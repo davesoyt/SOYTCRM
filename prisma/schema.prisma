@@ -1,0 +1,301 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id                 String              @id @default(cuid())
+  name               String
+  email              String              @unique
+  role               String              @default("member")
+  color              String              @default("#6366f1")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  tasks              Task[]
+  segmentAssignments SegmentAssignment[]
+  notifications      Notification[]
+}
+
+model Company {
+  id           String     @id @default(cuid())
+  name         String
+  domain       String?
+  industry     String?
+  size         String?
+  website      String?
+  customFields String     @default("{}")
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  contacts     Contact[]
+  deals        Deal[]
+  activities   Activity[]
+  tasks        Task[]
+}
+
+model Contact {
+  id           String       @id @default(cuid())
+  firstName    String
+  lastName     String
+  email        String       @unique
+  phone        String?
+  title        String?
+  leadScore    Int          @default(0)
+  linkedin     String?
+  enriched     Boolean      @default(false)
+  customFields String       @default("{}")
+  street       String?
+  city         String?
+  state        String?
+  zip          String?
+  country      String?
+  lat          Float?
+  lng          Float?
+  companyId    String?
+  company      Company?     @relation(fields: [companyId], references: [id])
+  deals        Deal[]
+  activities   Activity[]
+  enrollments  Enrollment[]
+  tasks        Task[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model Deal {
+  id         String     @id @default(cuid())
+  name       String
+  value      Float
+  stage      String     @default("Prospect")
+  ownerId    String?
+  contactId  String?
+  contact    Contact?   @relation(fields: [contactId], references: [id])
+  companyId  String?
+  company    Company?   @relation(fields: [companyId], references: [id])
+  pipelineId String?
+  pipeline   Pipeline?  @relation(fields: [pipelineId], references: [id])
+  activities Activity[]
+  tasks      Task[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  closedAt   DateTime?
+}
+
+model Pipeline {
+  id        String   @id @default(cuid())
+  name      String
+  stages    String   @default("[]")
+  isDefault Boolean  @default(false)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  deals     Deal[]
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String?
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Activity {
+  id        String   @id @default(cuid())
+  type      String
+  title     String
+  body      String?
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id])
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+  dealId    String?
+  deal      Deal?    @relation(fields: [dealId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  status      String    @default("todo")
+  priority    String    @default("medium")
+  dueDate     DateTime?
+  assigneeId  String?
+  assignee    User?     @relation(fields: [assigneeId], references: [id])
+  contactId   String?
+  contact     Contact?  @relation(fields: [contactId], references: [id])
+  companyId   String?
+  company     Company?  @relation(fields: [companyId], references: [id])
+  dealId      String?
+  deal        Deal?     @relation(fields: [dealId], references: [id])
+  segmentId   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Sequence {
+  id           String                @id @default(cuid())
+  name         String
+  description  String?
+  trigger      String                @default("Manual")
+  isActive     Boolean               @default(false)
+  nodesJson    String                @default("[]")
+  edgesJson    String                @default("[]")
+  steps        SequenceStep[]
+  enrollments  Enrollment[]
+  segmentLinks SegmentWorkflowLink[]
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+}
+
+model SequenceStep {
+  id         String   @id @default(cuid())
+  sequenceId String
+  sequence   Sequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  dayOffset  Int
+  subject    String
+  body       String
+  order      Int
+  assigneeId String?
+  segmentId  String?
+}
+
+model Segment {
+  id              String                @id @default(cuid())
+  name            String
+  description     String?
+  objectType      String                @default("contact")
+  filtersJson     String                @default("[]")
+  listType        String                @default("dynamic")
+  memberIds       String                @default("[]")
+  lastEvaluatedAt DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  assignments     SegmentAssignment[]
+  workflowLinks   SegmentWorkflowLink[]
+  campaigns       Campaign[]
+}
+
+model Campaign {
+  id             String    @id @default(cuid())
+  name           String
+  subject        String    @default("")
+  body           String    @default("")
+  segmentId      String?
+  segment        Segment?  @relation(fields: [segmentId], references: [id])
+  status         String    @default("draft")
+  sentAt         DateTime?
+  scheduledAt    DateTime?
+  recipientCount Int       @default(0)
+  openCount      Int       @default(0)
+  clickCount     Int       @default(0)
+  fromName       String    @default("")
+  fromEmail      String    @default("")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model SegmentAssignment {
+  id         String   @id @default(cuid())
+  segmentId  String
+  segment    Segment  @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedAt DateTime @default(now())
+
+  @@unique([segmentId, userId])
+}
+
+model CRMSettings {
+  id       String  @id @default("default")
+  name     String  @default("CRM")
+  logoData String? // base64 data URL
+}
+
+model CustomObjectDef {
+  id         String               @id @default(cuid())
+  name       String
+  pluralName String
+  slug       String               @unique
+  icon       String               @default("Box")
+  color      String               @default("#6366f1")
+  createdAt  DateTime             @default(now())
+  fields     FieldDefinition[]
+  records    CustomObjectRecord[]
+}
+
+model FieldDefinition {
+  id               String           @id @default(cuid())
+  objectType       String?          // 'contact' | 'company' | 'deal' | null (for custom)
+  customObjectDefId String?
+  customObjectDef  CustomObjectDef? @relation(fields: [customObjectDefId], references: [id], onDelete: Cascade)
+  key              String
+  label            String
+  fieldType        String           @default("text") // text|number|date|email|phone|url|select|boolean
+  selectOptions    String           @default("[]")   // JSON array
+  required         Boolean          @default(false)
+  isPrimary        Boolean          @default(false)
+  order            Int              @default(0)
+  isBuiltIn        Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+}
+
+model CustomObjectRecord {
+  id            String          @id @default(cuid())
+  objectDefId   String
+  objectDef     CustomObjectDef @relation(fields: [objectDefId], references: [id], onDelete: Cascade)
+  data          String          @default("{}")
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model ObjectRelationship {
+  id         String   @id @default(cuid())
+  fromObject String
+  fromField  String
+  toObject   String
+  toField    String
+  relType    String   @default("one_to_many")
+  label      String   @default("")
+  createdAt  DateTime @default(now())
+}
+
+model SegmentWorkflowLink {
+  id             String    @id @default(cuid())
+  segmentId      String
+  segment        Segment   @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  sequenceId     String
+  sequence       Sequence  @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  assignedUserId String?
+  createdAt      DateTime  @default(now())
+
+  @@unique([segmentId, sequenceId])
+}
+
+model Enrollment {
+  id          String    @id @default(cuid())
+  contactId   String
+  contact     Contact   @relation(fields: [contactId], references: [id])
+  sequenceId  String
+  sequence    Sequence  @relation(fields: [sequenceId], references: [id])
+  currentStep Int       @default(0)
+  active      Boolean   @default(true)
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+}
+
+model Form {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  objectTypes String   @default("[]")   // JSON: string[] of objectType slugs/ids
+  layoutJson  String   @default("[]")   // JSON: FormSection[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
