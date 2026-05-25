@@ -22,8 +22,8 @@ type Activity = {
   title: string
   body: string | null
   createdAt: string | Date
-  dealId?: string | null
-  deal?: { name: string } | null
+  opportunityId?: string | null
+  opportunity?: { name: string } | null
 }
 
 type TaskItem = {
@@ -63,14 +63,15 @@ type TimelineItem = {
   filterGroup: FilterGroup
 }
 
-type FilterGroup = 'all' | 'emails' | 'calls' | 'notes' | 'tasks' | 'deals' | 'workflows'
+type FilterGroup = 'all' | 'emails' | 'calls' | 'notes' | 'tasks' | 'opportunities' | 'workflows'
 
 const TYPE_STYLES: Record<string, { Icon: React.ElementType; color: string; ring: string; group: FilterGroup }> = {
   email:             { Icon: Mail,            color: 'bg-blue-100 text-blue-600',       ring: 'ring-blue-50',     group: 'emails' },
   call:              { Icon: Phone,           color: 'bg-green-100 text-green-600',     ring: 'ring-green-50',    group: 'calls' },
   note:              { Icon: StickyNote,      color: 'bg-amber-100 text-amber-600',     ring: 'ring-amber-50',    group: 'notes' },
-  deal_created:      { Icon: TrendingUp,      color: 'bg-emerald-100 text-emerald-600', ring: 'ring-emerald-50',  group: 'deals' },
-  stage_change:      { Icon: MoveRight,       color: 'bg-indigo-100 text-indigo-600',   ring: 'ring-indigo-50',   group: 'deals' },
+  opportunity_created: { Icon: TrendingUp, color: 'bg-emerald-100 text-emerald-600', ring: 'ring-emerald-50', group: 'opportunities' },
+  deal_created:        { Icon: TrendingUp, color: 'bg-emerald-100 text-emerald-600', ring: 'ring-emerald-50', group: 'opportunities' },
+  stage_change:        { Icon: MoveRight,  color: 'bg-indigo-100 text-indigo-600',   ring: 'ring-indigo-50',   group: 'opportunities' },
   task_created:      { Icon: CheckSquare,     color: 'bg-violet-100 text-violet-600',   ring: 'ring-violet-50',   group: 'tasks' },
   enrichment:        { Icon: Sparkles,        color: 'bg-pink-100 text-pink-600',       ring: 'ring-pink-50',     group: 'workflows' },
   sequence_enrolled: { Icon: GitBranch,       color: 'bg-cyan-100 text-cyan-600',       ring: 'ring-cyan-50',     group: 'workflows' },
@@ -90,7 +91,7 @@ const FILTER_LABELS: { key: FilterGroup; label: string }[] = [
   { key: 'calls', label: 'Calls' },
   { key: 'notes', label: 'Notes' },
   { key: 'tasks', label: 'Tasks' },
-  { key: 'deals', label: 'Deals' },
+  { key: 'opportunities', label: 'Opportunities' },
   { key: 'workflows', label: 'Workflows' },
 ]
 
@@ -124,7 +125,7 @@ export default function ActivityTimeline({
         title: a.title,
         subtitle: a.body,
         timestamp: toDate(a.createdAt),
-        link: a.dealId ? `/deals` : null,
+        link: a.opportunityId ? `/opportunities` : null,
         Icon: style.Icon,
         color: style.color,
         ring: style.ring,

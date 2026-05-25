@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ClipboardList, Plus, Trash2, X } from 'lucide-react'
+import { ClipboardList, Plus, Trash2, X, Eye } from 'lucide-react'
 import { createForm, deleteForm } from '@/app/actions'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -111,12 +111,28 @@ export default function FormsListClient({ forms: initialForms }: { forms: Form[]
                         </div>
                       </div>
                     </div>
-                    <button
-                      onClick={(e) => handleDelete(form.id, e)}
-                      className="shrink-0 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-zinc-400 hover:text-red-600 hover:bg-red-50 transition-all"
+                    <div
+                      className="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all"
+                      onClick={e => e.preventDefault()}
                     >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      <a
+                        href={`/forms/${form.id}/preview`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        className="p-1.5 rounded-lg text-zinc-400 hover:text-violet-600 hover:bg-violet-50 transition-colors"
+                        title="Preview form"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </a>
+                      <button
+                        onClick={(e) => handleDelete(form.id, e)}
+                        className="p-1.5 rounded-lg text-zinc-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        title="Delete form"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </Link>
               )

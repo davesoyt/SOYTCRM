@@ -4,13 +4,14 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 model User {
   id                 String              @id @default(cuid())
   name               String
   email              String              @unique
+  password           String?
   role               String              @default("member")
   color              String              @default("#6366f1")
   createdAt          DateTime            @default(now())
@@ -30,10 +31,14 @@ model Company {
   customFields String     @default("{}")
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
-  contacts     Contact[]
-  deals        Deal[]
-  activities   Activity[]
+  contacts      Contact[]
+  opportunities Opportunity[]
+  activities    Activity[]
   tasks        Task[]
+
+  @@index([name])
+  @@index([domain])
+  @@index([createdAt])
 }
 
 model Contact {
@@ -56,15 +61,22 @@ model Contact {
   lng          Float?
   companyId    String?
   company      Company?     @relation(fields: [companyId], references: [id])
-  deals        Deal[]
-  activities   Activity[]
-  enrollments  Enrollment[]
+  opportunities Opportunity[]
+  activities    Activity[]
+  enrollments   Enrollment[]
   tasks        Task[]
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
+
+  @@index([companyId])
+  @@index([leadScore])
+  @@index([firstName])
+  @@index([lastName])
+  @@index([phone])
+  @@index([createdAt])
 }
 
-model Deal {
+model Opportunity {
   id         String     @id @default(cuid())
   name       String
   value      Float
@@ -81,6 +93,15 @@ model Deal {
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
   closedAt   DateTime?
+
+  @@index([contactId])
+  @@index([companyId])
+  @@index([pipelineId])
+  @@index([stage])
+  @@index([name])
+  @@index([createdAt])
+  @@index([closedAt])
+  @@map("Opportunity")
 }
 
 model Pipeline {
@@ -90,7 +111,9 @@ model Pipeline {
   isDefault Boolean  @default(false)
   order     Int      @default(0)
   createdAt DateTime @default(now())
-  deals     Deal[]
+  opportunities Opportunity[]
+
+  @@index([isDefault, order])
 }
 
 model Notification {
@@ -103,6 +126,8 @@ model Notification {
   link      String?
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
+
+  @@index([userId, read, createdAt])
 }
 
 model Activity {
@@ -114,9 +139,14 @@ model Activity {
   contact   Contact? @relation(fields: [contactId], references: [id])
   companyId String?
   company   Company? @relation(fields: [companyId], references: [id])
-  dealId    String?
-  deal      Deal?    @relation(fields: [dealId], references: [id])
+  opportunityId String?
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
   createdAt DateTime @default(now())
+
+  @@index([contactId, createdAt])
+  @@index([companyId, createdAt])
+  @@index([opportunityId, createdAt])
+  @@index([type, createdAt])
 }
 
 model Task {
@@ -132,11 +162,18 @@ model Task {
   contact     Contact?  @relation(fields: [contactId], references: [id])
   companyId   String?
   company     Company?  @relation(fields: [companyId], references: [id])
-  dealId      String?
-  deal        Deal?     @relation(fields: [dealId], references: [id])
+  opportunityId String?
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
   segmentId   String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  @@index([assigneeId, status])
+  @@index([dueDate])
+  @@index([contactId])
+  @@index([companyId])
+  @@index([opportunityId])
+  @@index([createdAt])
 }
 
 model Sequence {
@@ -152,6 +189,8 @@ model Sequence {
   segmentLinks SegmentWorkflowLink[]
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @updatedAt
+
+  @@index([isActive, createdAt])
 }
 
 model SequenceStep {
@@ -164,6 +203,8 @@ model SequenceStep {
   order      Int
   assigneeId String?
   segmentId  String?
+
+  @@index([sequenceId, order])
 }
 
 model Segment {
@@ -180,6 +221,8 @@ model Segment {
   assignments     SegmentAssignment[]
   workflowLinks   SegmentWorkflowLink[]
   campaigns       Campaign[]
+
+  @@index([objectType, updatedAt])
 }
 
 model Campaign {
@@ -199,6 +242,9 @@ model Campaign {
   fromEmail      String    @default("")
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+
+  @@index([segmentId, status])
+  @@index([createdAt])
 }
 
 model SegmentAssignment {
@@ -228,11 +274,13 @@ model CustomObjectDef {
   createdAt  DateTime             @default(now())
   fields     FieldDefinition[]
   records    CustomObjectRecord[]
+
+  @@index([createdAt])
 }
 
 model FieldDefinition {
   id               String           @id @default(cuid())
-  objectType       String?          // 'contact' | 'company' | 'deal' | null (for custom)
+  objectType       String?          // 'contact' | 'company' | 'opportunity' | null (for custom)
   customObjectDefId String?
   customObjectDef  CustomObjectDef? @relation(fields: [customObjectDefId], references: [id], onDelete: Cascade)
   key              String
@@ -243,7 +291,11 @@ model FieldDefinition {
   isPrimary        Boolean          @default(false)
   order            Int              @default(0)
   isBuiltIn        Boolean          @default(false)
+  hidden           Boolean          @default(false)
   createdAt        DateTime         @default(now())
+
+  @@index([objectType, hidden, order])
+  @@index([customObjectDefId, hidden, order])
 }
 
 model CustomObjectRecord {
@@ -253,6 +305,46 @@ model CustomObjectRecord {
   data          String          @default("{}")
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+
+  @@index([objectDefId, createdAt])
+}
+
+/// Idempotency log for Stripe webhook processing.
+model ProcessedStripeEvent {
+  id          String   @id // Stripe event id (evt_...)
+  type        String
+  processedAt DateTime @default(now())
+}
+
+/// Configurable inbound webhook → object field mapping.
+model WebhookIntegration {
+  id             String   @id @default(cuid())
+  name           String
+  provider       String   @default("stripe") // stripe
+  enabled        Boolean  @default(true)
+  targetKind     String   // standard | custom
+  targetSlug     String   // contact | company | opportunity | custom object slug
+  eventTypes     String   @default("[]")    // JSON string[]
+  fieldMappings  String   @default("[]")    // JSON WebhookFieldMapping[]
+  upsertFieldKey String   @default("")      // object field used to find/update existing rows
+  webhookSecret  String   @default("")      // Stripe signing secret (whsec_...)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  deliveries ProcessedWebhookDelivery[]
+
+  @@index([provider, enabled])
+}
+
+model ProcessedWebhookDelivery {
+  id            String             @id @default(cuid())
+  integrationId String
+  integration   WebhookIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  eventId       String             // evt_...
+  eventType     String
+  processedAt   DateTime           @default(now())
+
+  @@unique([integrationId, eventId])
 }
 
 model ObjectRelationship {
@@ -264,6 +356,8 @@ model ObjectRelationship {
   relType    String   @default("one_to_many")
   label      String   @default("")
   createdAt  DateTime @default(now())
+
+  @@index([fromObject, toObject])
 }
 
 model SegmentWorkflowLink {
@@ -279,15 +373,46 @@ model SegmentWorkflowLink {
 }
 
 model Enrollment {
-  id          String    @id @default(cuid())
-  contactId   String
-  contact     Contact   @relation(fields: [contactId], references: [id])
-  sequenceId  String
-  sequence    Sequence  @relation(fields: [sequenceId], references: [id])
-  currentStep Int       @default(0)
-  active      Boolean   @default(true)
-  startedAt   DateTime  @default(now())
-  completedAt DateTime?
+  id            String           @id @default(cuid())
+  contactId     String?
+  contact       Contact?         @relation(fields: [contactId], references: [id])
+  companyId     String?
+  opportunityId String?
+  recordType    String           @default("contact") // contact | company | opportunity | <customObjectSlug>
+  recordId      String           @default("")        // primary record id (mirrors contactId/companyId/opportunityId or custom record id)
+  recordLabel   String           @default("")        // human display name at enrollment time
+  sequenceId    String
+  sequence      Sequence         @relation(fields: [sequenceId], references: [id])
+  currentStep   Int              @default(0)
+  currentNodeId String?          // canvas node id currently executing / waiting on
+  resumeAt      DateTime?        // when a wait step releases
+  contextJson   String           @default("{}") // formMode, segmentId, etc.
+  active        Boolean          @default(true)
+  startedAt     DateTime         @default(now())
+  completedAt   DateTime?
+  runLogs       WorkflowRunLog[]
+
+  @@index([sequenceId, active])
+  @@index([contactId])
+  @@index([companyId])
+  @@index([opportunityId])
+  @@index([recordType, recordId])
+  @@index([resumeAt])
+  @@index([startedAt])
+}
+
+model WorkflowRunLog {
+  id           String     @id @default(cuid())
+  enrollmentId String
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  stepIndex    Int        @default(0)
+  nodeType     String     // 'enrolled' | 'email' | 'task' | 'wait' | 'condition' | 'completed' | etc.
+  nodeLabel    String
+  dataJson     String     @default("{}") // JSON: rich data about what happened
+  status       String     @default("completed") // 'running' | 'completed' | 'skipped'
+  executedAt   DateTime   @default(now())
+
+  @@index([enrollmentId, executedAt])
 }
 
 model Form {
@@ -296,6 +421,15 @@ model Form {
   description String?
   objectTypes String   @default("[]")   // JSON: string[] of objectType slugs/ids
   layoutJson  String   @default("[]")   // JSON: FormSection[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Report {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  configJson  String   @default("{}") // JSON: ReportConfig
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

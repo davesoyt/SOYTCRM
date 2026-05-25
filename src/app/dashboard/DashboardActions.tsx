@@ -4,12 +4,12 @@ import { useState, useTransition } from 'react'
 import { Trash2, AlertTriangle } from 'lucide-react'
 import { clearAllRecords } from '@/app/actions'
 
-type Target = 'contacts' | 'companies' | 'deals'
+type Target = 'contacts' | 'companies' | 'opportunities'
 
 const TARGETS: { id: Target; label: string; warning: string }[] = [
-  { id: 'contacts', label: 'All Contacts', warning: 'This will permanently delete all contacts, their activities, and enrollments. Deals will be unlinked.' },
-  { id: 'companies', label: 'All Companies', warning: 'This will permanently delete all companies and their activities. Contacts and deals will be unlinked.' },
-  { id: 'deals', label: 'All Deals', warning: 'This will permanently delete all deals and deal-related activities.' },
+  { id: 'contacts', label: 'All Contacts', warning: 'This will permanently delete all contacts, their activities, and enrollments. Opportunities will be unlinked.' },
+  { id: 'companies', label: 'All Companies', warning: 'This will permanently delete all companies and their activities. Contacts and opportunities will be unlinked.' },
+  { id: 'opportunities', label: 'All Opportunities', warning: 'This will permanently delete all opportunities and opportunity-related activities.' },
 ]
 
 export default function DashboardActions() {

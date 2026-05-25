@@ -9,6 +9,7 @@ import {
 import { useRouter } from 'next/navigation'
 import {
   checkImportConflicts,
+  bulkImportAll,
   bulkImportCompanies,
   bulkImportContacts,
   type ImportTask,
@@ -53,6 +54,8 @@ type CustomFieldDef = { csvCol: string; fieldName: string }
 
 type Step = 1 | 2 | 2.5 | 3
 
+const IMPORT_BATCH_SIZE = 100
+
 // ── Component ──────────────────────────────────────────────────────────────────
 export default function CsvImporter({ targets }: { targets: Target[] }) {
   const router = useRouter()
@@ -67,6 +70,8 @@ export default function CsvImporter({ targets }: { targets: Target[] }) {
   const [skipIfBlank, setSkipIfBlank] = useState<Record<string, Set<string>>>({})
   const [step, setStep] = useState<Step>(1)
   const [loading, setLoading] = useState(false)
+  const [skipConflictCheck, setSkipConflictCheck] = useState(false)
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [conflicts, setConflicts] = useState<ImportConflict[]>([])
   const [resolvedTasks, setResolvedTasks] = useState<ImportTask[]>([])
 
@@ -138,6 +143,22 @@ export default function CsvImporter({ targets }: { targets: Target[] }) {
     }))
   }
 
+  function addAllUnmappedAsCustom(targetId: string) {
+    const unmapped = getUnmappedCols(targetId)
+    const existing = customFieldDefs[targetId] ?? []
+    const existingCols = new Set(existing.map((d) => d.csvCol))
+    const newDefs = unmapped
+      .filter((col) => !existingCols.has(col))
+      .map((col) => ({
+        csvCol: col,
+        fieldName: col.replace(/[_-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+      }))
+    setCustomFieldDefs((prev) => ({
+      ...prev,
+      [targetId]: [...existing, ...newDefs],
+    }))
+  }
+
   function setOverride(targetId: string, fieldKey: string, value: string) {
     setOverrides((prev) => ({
       ...prev,
@@ -205,16 +226,33 @@ export default function CsvImporter({ targets }: { targets: Target[] }) {
     })
   }
 
+  async function checkConflictsBatched(tasks: ImportTask[]): Promise<ImportConflict[]> {
+    const all: ImportConflict[] = []
+    for (const task of tasks) {
+      for (let i = 0; i < task.mappedData.length; i += IMPORT_BATCH_SIZE) {
+        const batch = task.mappedData.slice(i, i + IMPORT_BATCH_SIZE)
+        const found = await checkImportConflicts([{ targetId: task.targetId, mappedData: batch }])
+        all.push(...found)
+      }
+    }
+    return all
+  }
+
   async function handleImport() {
     setLoading(true)
     try {
       const tasks = buildTasks()
-      const found = await checkImportConflicts(tasks)
-      if (found.length) {
-        setConflicts(found)
-        setResolvedTasks(tasks)
-        setStep(2.5)
-        return
+      if (!skipConflictCheck) {
+        const totalRows = tasks.reduce((n, t) => n + t.mappedData.length, 0)
+        setProgress({ done: 0, total: totalRows })
+        const found = await checkConflictsBatched(tasks)
+        if (found.length) {
+          setProgress(null)
+          setConflicts(found)
+          setResolvedTasks(tasks)
+          setStep(2.5)
+          return
+        }
       }
       await runImport(tasks)
     } finally {
@@ -225,9 +263,41 @@ export default function CsvImporter({ targets }: { targets: Target[] }) {
   async function runImport(tasks: ImportTask[]) {
     const companyTask = tasks.find((t) => t.targetId === 'company')
     const contactTask = tasks.find((t) => t.targetId === 'contact')
-    let companyMap: Record<string, string> = {}
-    if (companyTask) companyMap = await bulkImportCompanies(companyTask.mappedData)
-    if (contactTask) await bulkImportContacts(contactTask.mappedData, companyMap)
+    const totalRows = (companyTask?.mappedData.length ?? 0) + (contactTask?.mappedData.length ?? 0)
+    if (totalRows === 0) {
+      setProgress(null)
+      router.refresh()
+      setStep(3)
+      return
+    }
+    setProgress({ done: 0, total: totalRows })
+
+    // Preferred path: one server action call for all rows (fewer round-trips, faster on Supabase).
+    try {
+      await bulkImportAll(tasks)
+      setProgress({ done: totalRows, total: totalRows })
+    } catch {
+      // Fallback: if payload/network/server constraints reject one-shot import, stream in batches.
+      let done = 0
+      let companyMap: Record<string, string> = {}
+      if (companyTask) {
+        for (let i = 0; i < companyTask.mappedData.length; i += IMPORT_BATCH_SIZE) {
+          const batch = companyTask.mappedData.slice(i, i + IMPORT_BATCH_SIZE)
+          companyMap = { ...companyMap, ...(await bulkImportCompanies(batch)) }
+          done += batch.length
+          setProgress({ done, total: totalRows })
+        }
+      }
+      if (contactTask) {
+        for (let i = 0; i < contactTask.mappedData.length; i += IMPORT_BATCH_SIZE) {
+          const batch = contactTask.mappedData.slice(i, i + IMPORT_BATCH_SIZE)
+          await bulkImportContacts(batch, companyMap)
+          done += batch.length
+          setProgress({ done, total: totalRows })
+        }
+      }
+    }
+    setProgress(null)
     router.refresh()
     setStep(3)
   }
@@ -521,9 +591,20 @@ export default function CsvImporter({ targets }: { targets: Target[] }) {
                   {/* Unmapped columns → custom fields */}
                   {(unmapped.length > 0 || defs.length > 0) && (
                     <div className="mt-5 pt-4 border-t border-zinc-100">
-                      <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-3">
-                        Unmapped Columns
-                      </p>
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">
+                          Unmapped Columns
+                        </p>
+                        {unmapped.filter((col) => !defs.find((d) => d.csvCol === col)).length > 0 && (
+                          <button
+                            onClick={() => addAllUnmappedAsCustom(targetId)}
+                            className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 font-medium transition-colors"
+                          >
+                            <Plus className="w-3 h-3" />
+                            Select all as custom fields
+                          </button>
+                        )}
+                      </div>
                       <div className="space-y-2">
                         {unmapped.map((col) => {
                           const def = defs.find((d) => d.csvCol === col)
@@ -592,8 +673,20 @@ export default function CsvImporter({ targets }: { targets: Target[] }) {
             })}
           </div>
 
-          <div className="flex justify-between mt-8">
-            <button onClick={() => setStep(1)} className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 transition-colors">
+          <div className="mt-6">
+            <label className="flex items-center gap-2 text-sm text-zinc-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={skipConflictCheck}
+                onChange={(e) => setSkipConflictCheck(e.target.checked)}
+                className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
+              />
+              Skip conflict check (faster — overwrites existing records without prompting)
+            </label>
+          </div>
+
+          <div className="flex justify-between items-center mt-4">
+            <button onClick={() => setStep(1)} disabled={loading} className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 transition-colors">
               Back
             </button>
             <button
@@ -605,6 +698,32 @@ export default function CsvImporter({ targets }: { targets: Target[] }) {
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
+
+          {progress && (
+            <div className="mt-4 p-4 bg-zinc-50 rounded-xl border border-zinc-200">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-zinc-700">
+                  {progress.done === 0 && !skipConflictCheck
+                    ? 'Checking for conflicts…'
+                    : `Importing… ${progress.done} / ${progress.total} records`}
+                </span>
+                <span className="text-sm font-semibold text-zinc-900">
+                  {progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 100}%
+                </span>
+              </div>
+              <div className="w-full h-3 bg-zinc-200 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-zinc-900 rounded-full transition-all duration-300 ease-out"
+                  style={{
+                    width: `${progress.total > 0 ? Math.max((progress.done / progress.total) * 100, 2) : 100}%`,
+                  }}
+                />
+              </div>
+              <p className="text-xs text-zinc-400 mt-1.5">
+                {progress.total - progress.done} remaining
+              </p>
+            </div>
+          )}
         </div>
       )}
 

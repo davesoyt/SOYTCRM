@@ -22,7 +22,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
   const contacts = await prisma.contact.findMany({
     include: {
       company: { select: { id: true, name: true, domain: true, industry: true, size: true } },
-      deals: { select: { stage: true, value: true } },
+      opportunities: { select: { stage: true, value: true } },
       activities: { select: { type: true } },
       enrollments: { select: { sequenceId: true } },
     },

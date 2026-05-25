@@ -96,6 +96,32 @@ const REL_TYPES = [
   { value: 'many_to_many', label: 'Many-to-Many', abbr: 'N:M' },
 ]
 
+/** For 1:N, fromObject is the "one" side and toObject is the "many" side. */
+function relEndsSummary(rel: Rel, objects: CRMObject[]): string {
+  const fromLabel = objects.find(o => o.id === rel.fromObject)?.label ?? rel.fromObject
+  const toLabel = objects.find(o => o.id === rel.toObject)?.label ?? rel.toObject
+  if (rel.relType === 'one_to_many') {
+    return `${fromLabel} (1) → ${toLabel} (N)`
+  }
+  if (rel.relType === 'one_to_one') {
+    return `${fromLabel} (1) ↔ ${toLabel} (1)`
+  }
+  if (rel.relType === 'many_to_many') {
+    return `${fromLabel} (N) ↔ ${toLabel} (N)`
+  }
+  return `${fromLabel} → ${toLabel}`
+}
+
+function swapRelEnds(rel: Rel): Rel {
+  return {
+    ...rel,
+    fromObject: rel.toObject,
+    fromField: rel.toField,
+    toObject: rel.fromObject,
+    toField: rel.fromField,
+  }
+}
+
 export default function RelationshipCanvas({
   objects,
   initialRelationships,
@@ -216,15 +242,54 @@ export default function RelationshipCanvas({
     setEditingRel(null)
   }, [])
 
-  const handleUpdateRel = useCallback(async (id: string, data: { relType?: string; label?: string }) => {
+  const handleUpdateRel = useCallback(async (
+    id: string,
+    data: {
+      relType?: string
+      label?: string
+      fromObject?: string
+      fromField?: string
+      toObject?: string
+      toField?: string
+    },
+  ) => {
     const updated = await updateObjectRelationship(id, data)
     setRelationships(prev => prev.map(r => r.id === id ? {
       ...r,
       relType: updated.relType,
       label: updated.label,
+      fromObject: updated.fromObject,
+      fromField: updated.fromField,
+      toObject: updated.toObject,
+      toField: updated.toField,
     } : r))
-    setEditingRel(prev => prev && prev.id === id ? { ...prev, ...data } : prev)
+    setEditingRel(prev => prev && prev.id === id ? {
+      ...prev,
+      relType: updated.relType,
+      label: updated.label,
+      fromObject: updated.fromObject,
+      fromField: updated.fromField,
+      toObject: updated.toObject,
+      toField: updated.toField,
+    } : prev)
   }, [])
+
+  const handleSwapRelEnds = useCallback(async () => {
+    if (!editingRel) return
+    const swapped = swapRelEnds(editingRel)
+    setEditingRel(swapped)
+    await handleUpdateRel(editingRel.id, {
+      fromObject: swapped.fromObject,
+      fromField: swapped.fromField,
+      toObject: swapped.toObject,
+      toField: swapped.toField,
+    })
+  }, [editingRel, handleUpdateRel])
+
+  const handleSetFromSide = useCallback(async (objectId: string) => {
+    if (!editingRel || editingRel.fromObject === objectId) return
+    await handleSwapRelEnds()
+  }, [editingRel, handleSwapRelEnds])
 
   // Compute canvas size
   const canvasW = Math.max(1200, ...Object.values(positions).map(p => p.x + CARD_WIDTH + 60))
@@ -479,15 +544,121 @@ export default function RelationshipCanvas({
           </div>
           <div className="px-4 py-3 space-y-3">
             <div>
-              <p className="text-xs font-medium text-zinc-500 mb-1">
-                {objects.find(o => o.id === editingRel.fromObject)?.label ?? editingRel.fromObject}
-                {' → '}
-                {objects.find(o => o.id === editingRel.toObject)?.label ?? editingRel.toObject}
+              <p className="text-xs font-medium text-zinc-700">
+                {relEndsSummary(editingRel, objects)}
               </p>
-              <p className="text-[11px] text-zinc-400">
+              <p className="text-[11px] text-zinc-400 mt-0.5">
                 {editingRel.fromField} → {editingRel.toField}
               </p>
             </div>
+
+            {(editingRel.relType === 'one_to_many' ||
+              editingRel.relType === 'one_to_one' ||
+              editingRel.relType === 'many_to_many') && (
+              <div className="rounded-lg border border-zinc-100 bg-zinc-50/80 px-3 py-2.5 space-y-2">
+                <p className="text-xs font-medium text-zinc-700">Cardinality sides</p>
+                {editingRel.relType === 'one_to_many' && (
+                  <>
+                    <div>
+                      <label className="text-[11px] font-medium text-zinc-500 block mb-1">
+                        One (1) — parent / owner
+                      </label>
+                      <select
+                        className="w-full text-sm border border-zinc-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+                        value={editingRel.fromObject}
+                        onChange={e => handleSetFromSide(e.target.value)}
+                      >
+                        <option value={editingRel.fromObject}>
+                          {objects.find(o => o.id === editingRel.fromObject)?.label ?? editingRel.fromObject}
+                        </option>
+                        <option value={editingRel.toObject}>
+                          {objects.find(o => o.id === editingRel.toObject)?.label ?? editingRel.toObject}
+                        </option>
+                      </select>
+                      <p className="text-[10px] text-zinc-400 mt-0.5 font-mono">{editingRel.fromField}</p>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-medium text-zinc-500 block mb-1">
+                        Many (N) — related records
+                      </label>
+                      <p className="text-sm text-zinc-800">
+                        {objects.find(o => o.id === editingRel.toObject)?.label ?? editingRel.toObject}
+                      </p>
+                      <p className="text-[10px] text-zinc-400 mt-0.5 font-mono">{editingRel.toField}</p>
+                    </div>
+                  </>
+                )}
+                {editingRel.relType === 'one_to_one' && (
+                  <>
+                    <div>
+                      <label className="text-[11px] font-medium text-zinc-500 block mb-1">
+                        First side (1) — arrow starts here
+                      </label>
+                      <select
+                        className="w-full text-sm border border-zinc-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+                        value={editingRel.fromObject}
+                        onChange={e => handleSetFromSide(e.target.value)}
+                      >
+                        <option value={editingRel.fromObject}>
+                          {objects.find(o => o.id === editingRel.fromObject)?.label ?? editingRel.fromObject}
+                        </option>
+                        <option value={editingRel.toObject}>
+                          {objects.find(o => o.id === editingRel.toObject)?.label ?? editingRel.toObject}
+                        </option>
+                      </select>
+                      <p className="text-[10px] text-zinc-400 mt-0.5 font-mono">{editingRel.fromField}</p>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-medium text-zinc-500 block mb-1">
+                        Second side (1)
+                      </label>
+                      <p className="text-sm text-zinc-800">
+                        {objects.find(o => o.id === editingRel.toObject)?.label ?? editingRel.toObject}
+                      </p>
+                      <p className="text-[10px] text-zinc-400 mt-0.5 font-mono">{editingRel.toField}</p>
+                    </div>
+                  </>
+                )}
+                {editingRel.relType === 'many_to_many' && (
+                  <>
+                    <div>
+                      <label className="text-[11px] font-medium text-zinc-500 block mb-1">
+                        Side A (N) — arrow starts here
+                      </label>
+                      <select
+                        className="w-full text-sm border border-zinc-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+                        value={editingRel.fromObject}
+                        onChange={e => handleSetFromSide(e.target.value)}
+                      >
+                        <option value={editingRel.fromObject}>
+                          {objects.find(o => o.id === editingRel.fromObject)?.label ?? editingRel.fromObject}
+                        </option>
+                        <option value={editingRel.toObject}>
+                          {objects.find(o => o.id === editingRel.toObject)?.label ?? editingRel.toObject}
+                        </option>
+                      </select>
+                      <p className="text-[10px] text-zinc-400 mt-0.5 font-mono">{editingRel.fromField}</p>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-medium text-zinc-500 block mb-1">
+                        Side B (N)
+                      </label>
+                      <p className="text-sm text-zinc-800">
+                        {objects.find(o => o.id === editingRel.toObject)?.label ?? editingRel.toObject}
+                      </p>
+                      <p className="text-[10px] text-zinc-400 mt-0.5 font-mono">{editingRel.toField}</p>
+                    </div>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="w-full text-xs font-medium text-violet-700 hover:text-violet-900 py-1"
+                  onClick={() => void handleSwapRelEnds()}
+                >
+                  Swap sides
+                </button>
+              </div>
+            )}
 
             <div>
               <p className="text-xs font-medium text-zinc-700 mb-1.5">Relationship Type</p>

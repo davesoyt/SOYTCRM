@@ -1,4 +1,41 @@
-export type ObjectType = 'contact' | 'company' | 'deal'
+export type StandardObjectType = 'contact' | 'company' | 'opportunity'
+
+/** @deprecated Use StandardObjectType for built-in objects; segment keys may also be `custom:{defId}` */
+export type ObjectType = StandardObjectType
+
+export const ALL_OBJECT_TYPES: StandardObjectType[] = ['contact', 'company', 'opportunity']
+
+/** Legacy segment JSON may still use `deal`. */
+export function normalizeObjectTypeSlug(type: string): string {
+  if (type === 'deal' || type === 'deals') return 'opportunity'
+  return type
+}
+
+export {
+  parseSegmentObjectTypes as parseObjectTypes,
+  serializeSegmentObjectTypes as serializeObjectTypes,
+} from '@/lib/segmentObjects'
+
+export function memberKey(objectType: string, id: string, multiObject: boolean): string {
+  return multiObject ? `${objectType}:${id}` : id
+}
+
+export function parseMemberKey(
+  key: string,
+  defaultType: string,
+): { objectType: string; id: string } {
+  if (key.startsWith('custom:')) {
+    const parts = key.split(':')
+    if (parts.length >= 3) {
+      return { objectType: `custom:${parts[1]}`, id: parts.slice(2).join(':') }
+    }
+  }
+  const colon = key.indexOf(':')
+  if (colon > 0) {
+    return { objectType: key.slice(0, colon), id: key.slice(colon + 1) }
+  }
+  return { objectType: defaultType, id: key }
+}
 
 export type FilterOperator =
   | 'contains' | 'not_contains' | 'equals' | 'not_equals'
@@ -9,6 +46,7 @@ export type FilterOperator =
 
 export type SegmentFilter = {
   id: string
+  objectType?: string
   field: string
   operator: FilterOperator
   value: string
@@ -33,7 +71,7 @@ export const SELECT_OPS: FilterOperator[] = ['equals', 'not_equals', 'is_set', '
 export const GEO_OPS: FilterOperator[]    = ['within_miles', 'within_km']
 
 const STAGES = ['Prospect', 'Qualified', 'Proposal', 'Closed Won', 'Closed Lost']
-const ACTIVITY_TYPES = ['email', 'call', 'note', 'deal_created', 'stage_change', 'enrichment', 'sequence_enrolled']
+const ACTIVITY_TYPES = ['email', 'call', 'note', 'opportunity_created', 'stage_change', 'enrichment', 'sequence_enrolled']
 
 // ─── Contact fields ───────────────────────────────────────────────────────────
 export const CONTACT_FIELDS: FieldMeta[] = [
@@ -58,10 +96,10 @@ export const CONTACT_FIELDS: FieldMeta[] = [
   { key: 'companyIndustry', label: 'Industry',      group: 'Company', valueType: 'text',   operators: TEXT_OPS },
   { key: 'companySize',     label: 'Company Size',  group: 'Company', valueType: 'text',   operators: TEXT_OPS },
   { key: 'companyDomain',   label: 'Company Domain',group: 'Company', valueType: 'text',   operators: TEXT_OPS },
-  // Deals
-  { key: 'dealCount',  label: 'Number of Deals',   group: 'Deals',   valueType: 'number',  operators: NUM_OPS },
-  { key: 'dealStage',  label: 'Deal Stage',         group: 'Deals',   valueType: 'select',  operators: SELECT_OPS, options: STAGES },
-  { key: 'dealValue',  label: 'Total Deal Value',   group: 'Deals',   valueType: 'number',  operators: NUM_OPS },
+  // Opportunities (filter keys kept for saved segments)
+  { key: 'dealCount',  label: 'Number of Opportunities',   group: 'Opportunities',   valueType: 'number',  operators: NUM_OPS },
+  { key: 'dealStage',  label: 'Opportunity Stage',         group: 'Opportunities',   valueType: 'select',  operators: SELECT_OPS, options: STAGES },
+  { key: 'dealValue',  label: 'Total Opportunity Value',   group: 'Opportunities',   valueType: 'number',  operators: NUM_OPS },
   // Activity
   { key: 'activityCount', label: 'Activity Count', group: 'Activity', valueType: 'number', operators: NUM_OPS },
   { key: 'activityType',  label: 'Activity Type',  group: 'Activity', valueType: 'select', operators: SELECT_OPS, options: ACTIVITY_TYPES },
@@ -79,24 +117,24 @@ export const COMPANY_FIELDS: FieldMeta[] = [
   { key: 'website',    label: 'Website',           group: 'Company',  valueType: 'text',   operators: ['is_set', 'is_not_set', 'contains'] },
   // Contacts (related)
   { key: 'contactCount', label: 'Number of Contacts', group: 'Contacts', valueType: 'number', operators: NUM_OPS },
-  // Deals (related)
-  { key: 'dealCount',    label: 'Number of Deals',    group: 'Deals',    valueType: 'number',  operators: NUM_OPS },
-  { key: 'dealStage',    label: 'Deal Stage',          group: 'Deals',    valueType: 'select',  operators: SELECT_OPS, options: STAGES },
-  { key: 'dealValue',    label: 'Total Deal Value ($)', group: 'Deals',   valueType: 'number',  operators: NUM_OPS },
-  { key: 'wonValue',     label: 'Closed Won Value ($)', group: 'Deals',   valueType: 'number',  operators: NUM_OPS },
+  // Opportunities (related; filter keys kept for saved segments)
+  { key: 'dealCount',    label: 'Number of Opportunities',    group: 'Opportunities',    valueType: 'number',  operators: NUM_OPS },
+  { key: 'dealStage',    label: 'Opportunity Stage',          group: 'Opportunities',    valueType: 'select',  operators: SELECT_OPS, options: STAGES },
+  { key: 'dealValue',    label: 'Total Opportunity Value ($)', group: 'Opportunities',   valueType: 'number',  operators: NUM_OPS },
+  { key: 'wonValue',     label: 'Closed Won Value ($)', group: 'Opportunities',   valueType: 'number',  operators: NUM_OPS },
   // Activity
   { key: 'activityCount', label: 'Activity Count',   group: 'Activity', valueType: 'number',  operators: NUM_OPS },
   { key: 'activityType',  label: 'Activity Type',    group: 'Activity', valueType: 'select',  operators: SELECT_OPS, options: ACTIVITY_TYPES },
 ]
 
-// ─── Deal fields ─────────────────────────────────────────────────────────────
-export const DEAL_FIELDS: FieldMeta[] = [
+// ─── Opportunity fields ──────────────────────────────────────────────────────
+export const OPPORTUNITY_FIELDS: FieldMeta[] = [
   // Core
-  { key: 'name',       label: 'Deal Name',         group: 'Deal',     valueType: 'text',   operators: TEXT_OPS },
-  { key: 'value',      label: 'Value ($)',          group: 'Deal',     valueType: 'number', operators: NUM_OPS },
-  { key: 'stage',      label: 'Stage',             group: 'Deal',     valueType: 'select', operators: SELECT_OPS, options: STAGES },
-  { key: 'isClosed',   label: 'Is Closed',         group: 'Deal',     valueType: 'boolean',operators: BOOL_OPS, options: ['true', 'false'] },
-  { key: 'daysOpen',   label: 'Days Since Created',group: 'Deal',     valueType: 'number', operators: NUM_OPS },
+  { key: 'name',       label: 'Opportunity Name',         group: 'Opportunity',     valueType: 'text',   operators: TEXT_OPS },
+  { key: 'value',      label: 'Value ($)',          group: 'Opportunity',     valueType: 'number', operators: NUM_OPS },
+  { key: 'stage',      label: 'Stage',             group: 'Opportunity',     valueType: 'select', operators: SELECT_OPS, options: STAGES },
+  { key: 'isClosed',   label: 'Is Closed',         group: 'Opportunity',     valueType: 'boolean',operators: BOOL_OPS, options: ['true', 'false'] },
+  { key: 'daysOpen',   label: 'Days Since Created',group: 'Opportunity',     valueType: 'number', operators: NUM_OPS },
   // Contact (related)
   { key: 'contactName',  label: 'Contact Name',    group: 'Contact',  valueType: 'text',   operators: TEXT_OPS },
   { key: 'contactEmail', label: 'Contact Email',   group: 'Contact',  valueType: 'text',   operators: TEXT_OPS },
@@ -110,15 +148,15 @@ export const DEAL_FIELDS: FieldMeta[] = [
   { key: 'activityType',  label: 'Activity Type',  group: 'Activity', valueType: 'select', operators: SELECT_OPS, options: ACTIVITY_TYPES },
 ]
 
-export function getFieldsForType(type: ObjectType): FieldMeta[] {
+export function getFieldsForType(type: StandardObjectType): FieldMeta[] {
   switch (type) {
     case 'contact': return CONTACT_FIELDS
     case 'company': return COMPANY_FIELDS
-    case 'deal':    return DEAL_FIELDS
+    case 'opportunity': return OPPORTUNITY_FIELDS
   }
 }
 
-export function getGroupsForType(type: ObjectType): string[] {
+export function getGroupsForType(type: StandardObjectType): string[] {
   return [...new Set(getFieldsForType(type).map(f => f.group))]
 }
 
@@ -142,11 +180,28 @@ export const OP_LABELS: Record<FilterOperator, string> = {
 // ─── Flat serializable record ─────────────────────────────────────────────────
 export type FlatRecord = {
   _id: string
+  _objectType?: string
   _displayName: string
   _subtext: string
   _href: string
   _initials: string
 } & Record<string, unknown>
+
+export function applyFiltersForObjectTypes(
+  recordsByType: Partial<Record<string, FlatRecord[]>>,
+  filters: SegmentFilter[],
+  objectTypes: string[],
+): FlatRecord[] {
+  const defaultType = objectTypes[0]
+  const result: FlatRecord[] = []
+  for (const type of objectTypes) {
+    const records = recordsByType[type] ?? []
+    const typeFilters = filters.filter(f => (f.objectType ?? defaultType) === type)
+    const matched = applyFilters(records, typeFilters)
+    result.push(...matched.map(r => ({ ...r, _objectType: type })))
+  }
+  return result
+}
 
 // ─── Haversine ────────────────────────────────────────────────────────────────
 function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -263,7 +318,7 @@ type PrismaContact = {
   street: string | null; city: string | null; state: string | null; zip: string | null
   country: string | null; lat: number | null; lng: number | null
   company: { id: string; name: string; domain: string | null; industry: string | null; size: string | null } | null
-  deals: { stage: string; value: number }[]
+  opportunities: { stage: string; value: number }[]
   activities: { type: string }[]
   enrollments: { sequenceId: string }[]
 }
@@ -273,11 +328,11 @@ type PrismaCompany = {
   size: string | null; website: string | null
   customFields: string
   contacts: { id: string }[]
-  deals: { stage: string; value: number }[]
+  opportunities: { stage: string; value: number }[]
   activities: { type: string }[]
 }
 
-type PrismaDeal = {
+type PrismaOpportunity = {
   id: string; name: string; value: number; stage: string
   createdAt: Date; closedAt: Date | null
   contact: { firstName: string; lastName: string; email: string; title: string | null; leadScore: number } | null
@@ -286,7 +341,7 @@ type PrismaDeal = {
 }
 
 export function flattenContact(c: PrismaContact): FlatRecord {
-  const dealValue = c.deals.reduce((s, d) => s + d.value, 0)
+  const dealValue = c.opportunities.reduce((s, d) => s + d.value, 0)
   let parsedCustom: Record<string, string> = {}
   try { parsedCustom = JSON.parse(c.customFields) } catch {}
   const customEntries = Object.fromEntries(Object.entries(parsedCustom).map(([k, v]) => [`custom_${k}`, v]))
@@ -302,8 +357,8 @@ export function flattenContact(c: PrismaContact): FlatRecord {
     lat: c.lat, lng: c.lng,
     companyName: c.company?.name ?? null, companyIndustry: c.company?.industry ?? null,
     companySize: c.company?.size ?? null, companyDomain: c.company?.domain ?? null,
-    dealCount: c.deals.length, dealValue,
-    dealStages: c.deals.map(d => d.stage),
+    dealCount: c.opportunities.length, dealValue,
+    dealStages: c.opportunities.map(d => d.stage),
     activityCount: c.activities.length,
     activityTypes: c.activities.map(a => a.type),
     sequenceIds: c.enrollments.map(e => e.sequenceId),
@@ -312,8 +367,8 @@ export function flattenContact(c: PrismaContact): FlatRecord {
 }
 
 export function flattenCompany(c: PrismaCompany): FlatRecord {
-  const dealValue = c.deals.reduce((s, d) => s + d.value, 0)
-  const wonValue = c.deals.filter(d => d.stage === 'Closed Won').reduce((s, d) => s + d.value, 0)
+  const dealValue = c.opportunities.reduce((s, d) => s + d.value, 0)
+  const wonValue = c.opportunities.filter(d => d.stage === 'Closed Won').reduce((s, d) => s + d.value, 0)
   let parsedCustom: Record<string, string> = {}
   try { parsedCustom = JSON.parse(c.customFields) } catch {}
   const customEntries = Object.fromEntries(Object.entries(parsedCustom).map(([k, v]) => [`custom_${k}`, v]))
@@ -324,18 +379,18 @@ export function flattenCompany(c: PrismaCompany): FlatRecord {
     _initials: c.name[0] ?? '?',
     name: c.name, domain: c.domain, industry: c.industry, size: c.size, website: c.website,
     contactCount: c.contacts.length,
-    dealCount: c.deals.length, dealValue, wonValue,
-    dealStages: c.deals.map(d => d.stage),
+    dealCount: c.opportunities.length, dealValue, wonValue,
+    dealStages: c.opportunities.map(d => d.stage),
     activityCount: c.activities.length,
     activityTypes: c.activities.map(a => a.type),
     ...customEntries,
   }
 }
 
-export function flattenDeal(d: PrismaDeal): FlatRecord {
+export function flattenOpportunity(d: PrismaOpportunity): FlatRecord {
   const daysOpen = Math.floor((Date.now() - d.createdAt.getTime()) / 86_400_000)
   return {
-    _id: d.id, _href: '/deals',
+    _id: d.id, _href: '/opportunities',
     _displayName: d.name,
     _subtext: `${d.stage} · $${d.value.toLocaleString()}`,
     _initials: '$',

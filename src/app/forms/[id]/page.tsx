@@ -32,10 +32,10 @@ const STANDARD_BUILT_INS: Record<string, { label: string; fields: { key: string;
       { key: 'website',  label: 'Website',       fieldType: 'url' },
     ],
   },
-  deal: {
-    label: 'Deal',
+  opportunity: {
+    label: 'Opportunity',
     fields: [
-      { key: 'name',  label: 'Deal Name', fieldType: 'text' },
+      { key: 'name',  label: 'Opportunity Name', fieldType: 'text' },
       { key: 'value', label: 'Value ($)', fieldType: 'number' },
       { key: 'stage', label: 'Stage',     fieldType: 'select' },
     ],
@@ -59,8 +59,8 @@ export default async function FormDesignerPage({ params }: { params: Promise<{ i
 
   const [form, fieldDefs, customObjectDefs] = await Promise.all([
     prisma.form.findUnique({ where: { id } }),
-    prisma.fieldDefinition.findMany({ orderBy: { order: 'asc' } }),
-    prisma.customObjectDef.findMany({ include: { fields: { orderBy: { order: 'asc' } } } }),
+    prisma.fieldDefinition.findMany({ where: { hidden: false }, orderBy: { order: 'asc' } }),
+    prisma.customObjectDef.findMany({ include: { fields: { where: { hidden: false }, orderBy: { order: 'asc' } } } }),
   ])
 
   if (!form) notFound()
@@ -71,17 +71,18 @@ export default async function FormDesignerPage({ params }: { params: Promise<{ i
     const savedForObject = fieldDefs.filter(f => f.objectType === slug)
     const savedMap = new Map(savedForObject.map(f => [f.key, f]))
 
-    const builtInFields = meta.fields.map(bf => {
+    const builtInFields = meta.fields.flatMap(bf => {
       const saved = savedMap.get(bf.key)
-      return {
+      if (saved?.hidden) return []
+      return [{
         key: bf.key,
         label: saved?.label ?? bf.label,
         fieldType: saved?.fieldType ?? bf.fieldType,
-      }
+      }]
     })
 
     const definedCustomFields = savedForObject
-      .filter(f => !f.isBuiltIn)
+      .filter(f => !f.isBuiltIn && !f.hidden)
       .map(f => ({ key: f.key, label: f.label, fieldType: f.fieldType }))
 
     availableObjects.push({

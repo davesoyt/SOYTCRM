@@ -9,22 +9,22 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
   const company = await prisma.company.findUnique({
     where: { id },
     include: {
-      contacts: { include: { deals: true, activities: true } },
-      deals: { orderBy: { createdAt: 'desc' } },
+      contacts: { include: { opportunities: true, activities: true } },
+      opportunities: { orderBy: { createdAt: 'desc' } },
       activities: { orderBy: { createdAt: 'desc' } },
       tasks: { orderBy: { createdAt: 'desc' } },
     },
   })
   if (!company) notFound()
 
-  const totalDealValue = company.deals
+  const totalOpportunityValue = company.opportunities
     .filter((d) => d.stage !== 'Closed Lost')
     .reduce((sum, d) => sum + d.value, 0)
 
   return (
     <CompanyView
       company={company}
-      totalDealValue={totalDealValue}
+      totalOpportunityValue={totalOpportunityValue}
     />
   )
 }

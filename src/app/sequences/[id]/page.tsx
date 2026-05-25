@@ -2,14 +2,14 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { processSequenceStep } from '@/app/actions'
-import { ArrowLeft, CheckCircle2, Clock, Users } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Clock, Users, Calendar } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import WorkflowCanvas from './WorkflowCanvas'
 import type { Node, Edge } from '@xyflow/react'
 
 export default async function SequencePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const [sequence, users, segments, forms] = await Promise.all([
+  const [sequence, users, segments, forms, segmentLinks] = await Promise.all([
     prisma.sequence.findUnique({
       where: { id },
       include: {
@@ -23,6 +23,10 @@ export default async function SequencePage({ params }: { params: Promise<{ id: s
     prisma.user.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } }),
     prisma.segment.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } }),
     prisma.form.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+    prisma.segmentWorkflowLink.findMany({
+      where: { sequenceId: id },
+      include: { segment: { select: { id: true, name: true } } },
+    }),
   ])
   if (!sequence) notFound()
 
@@ -82,6 +86,13 @@ export default async function SequencePage({ params }: { params: Promise<{ id: s
           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sequence.isActive ? 'bg-green-100 text-green-700' : 'bg-zinc-100 text-zinc-500'}`}>
             {sequence.isActive ? 'Active' : 'Draft'}
           </span>
+          <Link
+            href="/sequences/history"
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg border border-zinc-200 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50 transition-colors"
+          >
+            <Calendar className="w-3 h-3" />
+            Run History
+          </Link>
         </div>
       </div>
 
@@ -97,13 +108,14 @@ export default async function SequencePage({ params }: { params: Promise<{ id: s
             users={users}
             segments={segments}
             forms={forms}
+            segmentLinks={segmentLinks}
           />
         </div>
 
         {/* Enrollments panel */}
         <div className="w-72 shrink-0 border-l border-zinc-200 bg-white flex flex-col overflow-hidden">
           <div className="px-4 py-3 border-b border-zinc-100">
-            <h2 className="text-sm font-semibold text-zinc-900">Enrolled Contacts</h2>
+            <h2 className="text-sm font-semibold text-zinc-900">Enrolled Records</h2>
             <p className="text-xs text-zinc-400 mt-0.5">{sequence.enrollments.length} total</p>
           </div>
           <div className="flex-1 overflow-y-auto divide-y divide-zinc-50">
@@ -111,13 +123,34 @@ export default async function SequencePage({ params }: { params: Promise<{ id: s
               const totalSteps = sequence.steps.length
               const progress = totalSteps ? Math.round((e.currentStep / totalSteps) * 100) : 0
               const advanceAction = processSequenceStep.bind(null, e.id)
+              const displayName = e.contact
+                ? `${e.contact.firstName} ${e.contact.lastName}`
+                : e.recordLabel || e.recordId
+              const recordHref = e.contactId
+                ? `/contacts/${e.contactId}`
+                : e.companyId
+                  ? `/companies/${e.companyId}`
+                  : e.opportunityId
+                    ? '/opportunities'
+                    : null
               return (
                 <div key={e.id} className="p-4">
-                  <div className="flex items-start justify-between mb-1.5">
-                    <Link href={`/contacts/${e.contactId}`} className="text-sm font-medium hover:underline text-zinc-900">
-                      {e.contact.firstName} {e.contact.lastName}
-                    </Link>
-                    <span className={`flex items-center gap-1 text-xs font-medium shrink-0 ml-2 ${e.active ? 'text-green-600' : 'text-zinc-400'}`}>
+                  <div className="flex items-start justify-between mb-1.5 gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      {recordHref ? (
+                        <Link href={recordHref} className="text-sm font-medium hover:underline text-zinc-900 truncate">
+                          {displayName}
+                        </Link>
+                      ) : (
+                        <span className="text-sm font-medium text-zinc-900 truncate">{displayName}</span>
+                      )}
+                      {!e.contact && e.recordType && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-100 text-zinc-500 capitalize shrink-0">
+                          {e.recordType}
+                        </span>
+                      )}
+                    </div>
+                    <span className={`flex items-center gap-1 text-xs font-medium shrink-0 ${e.active ? 'text-green-600' : 'text-zinc-400'}`}>
                       {e.active ? <Clock className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}
                       {e.active ? `Step ${e.currentStep + 1}` : 'Done'}
                     </span>
@@ -128,7 +161,7 @@ export default async function SequencePage({ params }: { params: Promise<{ id: s
                   <div className="w-full h-1 rounded-full bg-zinc-100">
                     <div className="h-full rounded-full bg-zinc-900 transition-all" style={{ width: `${progress}%` }} />
                   </div>
-                  {e.active && totalSteps > 0 && (
+                  {e.active && totalSteps > 0 && e.contactId && (
                     <form action={advanceAction} className="mt-2">
                       <button type="submit" className="text-xs text-zinc-500 hover:text-zinc-900 transition-colors">
                         → Send next step
@@ -140,7 +173,7 @@ export default async function SequencePage({ params }: { params: Promise<{ id: s
             })}
             {!sequence.enrollments.length && (
               <div className="p-4 text-xs text-zinc-400 text-center py-8">
-                No contacts enrolled yet.<br />Enroll from a contact page.
+                No records enrolled yet.<br />Run the workflow on a segment to enroll.
               </div>
             )}
           </div>

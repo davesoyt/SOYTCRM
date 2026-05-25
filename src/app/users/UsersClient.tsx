@@ -27,6 +27,7 @@ function Avatar({ user, size = 'md' }: { user: { name: string; color: string }; 
 function UserForm({ onDone, initial }: { onDone: () => void; initial?: User }) {
   const [name, setName] = useState(initial?.name ?? '')
   const [email, setEmail] = useState(initial?.email ?? '')
+  const [password, setPassword] = useState('')
   const [role, setRole] = useState(initial?.role ?? 'member')
   const [color, setColor] = useState(initial?.color ?? COLORS[0])
   const [isPending, startTransition] = useTransition()
@@ -34,11 +35,12 @@ function UserForm({ onDone, initial }: { onDone: () => void; initial?: User }) {
   function submit() {
     startTransition(async () => {
       if (initial) {
-        await updateUser(initial.id, { name, email, role, color })
+        await updateUser(initial.id, { name, email, role, color, ...(password ? { password } : {}) })
       } else {
         const fd = new FormData()
         fd.set('name', name); fd.set('email', email)
         fd.set('role', role); fd.set('color', color)
+        if (password) fd.set('password', password)
         await createUser(fd)
       }
       onDone()
@@ -57,6 +59,14 @@ function UserForm({ onDone, initial }: { onDone: () => void; initial?: User }) {
         <div>
           <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wide mb-1">Email *</label>
           <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="jane@company.com"
+            className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wide mb-1">
+            Password {initial ? '' : '*'}
+          </label>
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+            placeholder={initial ? 'Leave blank to keep current' : 'Enter password'}
             className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900" />
         </div>
         <div>
@@ -85,7 +95,7 @@ function UserForm({ onDone, initial }: { onDone: () => void; initial?: User }) {
         <button onClick={onDone} className="flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50">
           <X className="w-3.5 h-3.5" /> Cancel
         </button>
-        <button onClick={submit} disabled={isPending || !name || !email}
+        <button onClick={submit} disabled={isPending || !name || !email || (!initial && !password)}
           className="flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50">
           {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
           {initial ? 'Save' : 'Add User'}

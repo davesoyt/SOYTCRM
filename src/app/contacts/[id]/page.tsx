@@ -12,7 +12,7 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
     include: {
       company: true,
       activities: { orderBy: { createdAt: 'desc' } },
-      deals: true,
+      opportunities: true,
       enrollments: { include: { sequence: true } },
       tasks: { orderBy: { createdAt: 'desc' } },
     },

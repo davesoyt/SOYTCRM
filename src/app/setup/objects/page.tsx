@@ -6,7 +6,7 @@ import NewObjectButton from './NewObjectButton'
 const STANDARD_OBJECTS = [
   { slug: 'contact', label: 'Contacts', icon: Users, color: 'bg-violet-100 text-violet-600', desc: 'People in your CRM' },
   { slug: 'company', label: 'Companies', icon: Building2, color: 'bg-blue-100 text-blue-600', desc: 'Organizations you work with' },
-  { slug: 'deal', label: 'Deals', icon: TrendingUp, color: 'bg-emerald-100 text-emerald-600', desc: 'Opportunities in your pipeline' },
+  { slug: 'opportunity', label: 'Opportunities', icon: TrendingUp, color: 'bg-emerald-100 text-emerald-600', desc: 'Opportunities in your pipeline' },
 ]
 
 export default async function ObjectsPage() {
@@ -18,7 +18,13 @@ export default async function ObjectsPage() {
         <h1 className="text-xl font-bold text-zinc-900">Objects &amp; Fields</h1>
         <NewObjectButton />
       </div>
-      <p className="text-sm text-zinc-500 mb-8">Define fields for standard and custom objects.</p>
+      <p className="text-sm text-zinc-500 mb-8">
+        Define fields for standard and custom objects.{' '}
+        <Link href="/setup/schema" className="text-zinc-900 underline">
+          Open Schema Editor
+        </Link>{' '}
+        to add, rename, or remove fields with data migration.
+      </p>
 
       <section className="mb-8">
         <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-3">Standard Objects</p>

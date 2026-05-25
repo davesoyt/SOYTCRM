@@ -13,7 +13,7 @@ export default function FunnelChart({ data }: { data: FunnelData[] }) {
         <XAxis dataKey="stage" tick={{ fontSize: 11 }} />
         <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
         <Tooltip labelStyle={{ fontWeight: 600 }} />
-        <Bar dataKey="count" name="Deals" radius={[4, 4, 0, 0]}>
+        <Bar dataKey="count" name="Opportunities" radius={[4, 4, 0, 0]}>
           {data.map((_, i) => (
             <Cell key={i} fill={COLORS[i % COLORS.length]} />
           ))}

@@ -1,10 +1,12 @@
 import Link from 'next/link'
-import { Settings, Box, ChevronRight, GitFork } from 'lucide-react'
+import { Settings, Box, ChevronRight, GitFork, Table2, Webhook } from 'lucide-react'
 
 const TABS = [
   { href: '/setup', label: 'General', icon: Settings },
+  { href: '/setup/schema', label: 'Schema', icon: Table2 },
   { href: '/setup/objects', label: 'Objects & Fields', icon: Box },
   { href: '/setup/relationships', label: 'Relationships', icon: GitFork },
+  { href: '/setup/webhooks', label: 'Webhooks', icon: Webhook },
 ]
 
 export default function SetupLayout({ children }: { children: React.ReactNode }) {

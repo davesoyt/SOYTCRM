@@ -6,6 +6,7 @@ import {
   ArrowLeft, Plus, Trash2, GripVertical, CheckSquare, Square,
   ChevronDown, ChevronUp, Save, CheckCircle2, ClipboardList,
   AlignLeft, Hash, Calendar, Mail, Phone, Globe, List, ToggleLeft,
+  Eye, Settings2,
 } from 'lucide-react'
 import { nanoid } from 'nanoid'
 import { saveForm } from '@/app/actions'
@@ -371,6 +372,7 @@ type FormProps = {
 export default function FormDesigner({ form, availableObjects }: FormProps) {
   const [name, setName] = useState(form.name)
   const [description, setDescription] = useState(form.description)
+  const [tab, setTab] = useState<'design' | 'preview'>('design')
   const [selectedObjectTypes, setSelectedObjectTypes] = useState<string[]>(() => {
     try { return JSON.parse(form.objectTypes) } catch { return [] }
   })
@@ -564,6 +566,11 @@ export default function FormDesigner({ form, availableObjects }: FormProps) {
     setTimeout(() => setSaved(false), 2000)
   }
 
+  async function switchToPreview() {
+    await handleSave()
+    setTab('preview')
+  }
+
   // ---- Object type toggle ----
 
   function toggleObjectType(id: string) {
@@ -575,24 +582,41 @@ export default function FormDesigner({ form, availableObjects }: FormProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Top toolbar */}
-      <div className="flex items-center gap-4 px-6 py-3 border-b border-zinc-200 bg-white shrink-0">
-        <Link href="/forms" className="text-zinc-400 hover:text-zinc-700 transition-colors">
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200 bg-white shrink-0">
+        <Link href="/forms" className="text-zinc-400 hover:text-zinc-700 transition-colors p-1">
           <ArrowLeft className="w-4 h-4" />
         </Link>
-        <div className="flex items-center gap-2.5 flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
           <ClipboardList className="w-4 h-4 text-violet-600 shrink-0" />
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             className="font-semibold text-zinc-900 bg-transparent focus:outline-none border-b border-transparent hover:border-zinc-300 focus:border-violet-500 transition-colors text-base leading-tight min-w-0 flex-1"
           />
+          <input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Description…"
+            className="text-sm text-zinc-500 bg-transparent focus:outline-none border-b border-transparent hover:border-zinc-300 focus:border-violet-500 transition-colors hidden sm:block w-44"
+          />
         </div>
-        <input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Description…"
-          className="text-sm text-zinc-500 bg-transparent focus:outline-none border-b border-transparent hover:border-zinc-300 focus:border-violet-500 transition-colors hidden sm:block w-48"
-        />
+
+        {/* Tabs */}
+        <div className="flex items-center gap-1 bg-zinc-100 rounded-lg p-1 shrink-0">
+          <button
+            onClick={() => setTab('design')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'design' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
+          >
+            <Settings2 className="w-3.5 h-3.5" /> Design
+          </button>
+          <button
+            onClick={switchToPreview}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'preview' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
+          >
+            <Eye className="w-3.5 h-3.5" /> Preview
+          </button>
+        </div>
+
         <button
           onClick={handleSave}
           disabled={saving}
@@ -603,7 +627,17 @@ export default function FormDesigner({ form, availableObjects }: FormProps) {
         </button>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      {tab === 'preview' && (
+        <div className="flex-1 min-h-0">
+          <iframe
+            src={`/forms/${form.id}/preview`}
+            className="w-full h-full border-none"
+            title="Form Preview"
+          />
+        </div>
+      )}
+
+      {tab === 'design' && <div className="flex flex-1 overflow-hidden">
         {/* ---- Left Palette Panel ---- */}
         <div className="w-72 shrink-0 border-r border-zinc-200 bg-white flex flex-col overflow-hidden">
           {/* Object type selector */}
@@ -735,7 +769,7 @@ export default function FormDesigner({ form, availableObjects }: FormProps) {
             </>
           )}
         </div>
-      </div>
+      </div>}
     </div>
   )
 }

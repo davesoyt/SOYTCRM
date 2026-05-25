@@ -2,6 +2,7 @@
 
 import { useState, useTransition, useMemo } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   LayoutGrid, CheckSquare, GitBranch, ClipboardList,
   Calendar, Flag, ChevronDown, ChevronRight,
@@ -9,6 +10,7 @@ import {
   Circle, ArrowRight,
 } from 'lucide-react'
 import { updateTaskStatus } from '@/app/actions'
+import { isFillFormTask, parseFormIdFromTask, formFillUrl } from '@/lib/formTasks'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -20,7 +22,7 @@ type TaskRec = {
   assigneeId: string | null
   contact:  { id: string; firstName: string; lastName: string } | null
   company:  { id: string; name: string } | null
-  deal:     { id: string; name: string } | null
+  opportunity:     { id: string; name: string } | null
   segmentId: string | null
 }
 
@@ -127,11 +129,14 @@ function SectionHeader({ icon: Icon, title, count, color }: {
 // ── Task card ─────────────────────────────────────────────────────────────────
 
 function TaskCard({ task }: { task: TaskRec }) {
+  const router = useRouter()
   const [status, setStatus] = useState(task.status)
   const [, startTransition] = useTransition()
   const pri = PRIORITY_CFG[task.priority] ?? PRIORITY_CFG.medium
   const overdue = isOverdue(task.dueDate) && status !== 'done'
   const [expanded, setExpanded] = useState(false)
+  const formId = parseFormIdFromTask(task)
+  const isFormTask = isFillFormTask(task) && !!formId
 
   function advance() {
     const next = status === 'todo' ? 'in_progress' : 'done'
@@ -142,12 +147,15 @@ function TaskCard({ task }: { task: TaskRec }) {
   return (
     <div
       className={`bg-white rounded-xl border border-l-4 ${pri.border} border-zinc-200 p-3 hover:shadow-sm transition-shadow cursor-pointer ${status === 'in_progress' ? 'ring-1 ring-blue-200' : ''}`}
-      onClick={() => setExpanded(v => !v)}
+      onClick={() => {
+        if (isFormTask && formId) router.push(formFillUrl(formId, task.id))
+        else setExpanded(v => !v)
+      }}
     >
       <div className="flex items-start gap-2.5">
         {/* Status toggle */}
         <button
-          onClick={e => { e.stopPropagation(); advance() }}
+          onClick={e => { e.stopPropagation(); isFormTask && formId ? router.push(formFillUrl(formId, task.id)) : advance() }}
           title={status === 'todo' ? 'Mark in progress' : 'Mark done'}
           className={`mt-0.5 shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
             status === 'done' ? 'bg-green-500 border-green-500' :
@@ -162,6 +170,9 @@ function TaskCard({ task }: { task: TaskRec }) {
         <div className="flex-1 min-w-0">
           <p className={`text-sm font-medium leading-snug ${status === 'done' ? 'line-through text-zinc-400' : 'text-zinc-900'}`}>
             {task.title}
+            {isFormTask && (
+              <span className="ml-2 text-[10px] font-medium text-violet-600 not-italic">· open form</span>
+            )}
           </p>
 
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">

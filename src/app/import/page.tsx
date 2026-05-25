@@ -35,14 +35,19 @@ export default async function ImportPage() {
     )
 
     // Built-in fields: use saved label if available, otherwise default
-    const builtInFields = BUILT_IN_DEFAULTS[slug].map(bf => ({
-      key: bf.key,
-      name: savedMap.get(bf.key) ?? bf.name,
-    }))
+    const builtInFields = BUILT_IN_DEFAULTS[slug]
+      .filter((bf) => {
+        const saved = fieldDefs.find((f) => f.objectType === slug && f.key === bf.key && f.isBuiltIn)
+        return !saved?.hidden
+      })
+      .map(bf => ({
+        key: bf.key,
+        name: savedMap.get(bf.key) ?? bf.name,
+      }))
 
     // Custom fields saved in FieldDefinition
     const customFields = fieldDefs
-      .filter(f => f.objectType === slug && !f.isBuiltIn)
+      .filter(f => f.objectType === slug && !f.isBuiltIn && !f.hidden)
       .map(f => ({ key: f.key, name: f.label }))
 
     return {
@@ -56,7 +61,7 @@ export default async function ImportPage() {
     <div className="p-8">
       <div className="flex items-center gap-3 mb-6">
         <Upload className="w-6 h-6" />
-        <h1 className="text-2xl font-bold">Data Import</h1>
+        <h1 className="text-2xl font-bold">File Import</h1>
       </div>
       <CsvImporter targets={targets} />
     </div>

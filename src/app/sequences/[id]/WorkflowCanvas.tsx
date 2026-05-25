@@ -24,6 +24,14 @@ import {
   ChevronDown, X, Users, ClipboardList,
 } from 'lucide-react'
 import { saveWorkflowState } from '@/app/actions'
+import { formatWaitLabel, normalizeWaitConfig, type WaitUnit } from '@/lib/workflowExecution'
+import WorkflowSegmentRunner from './WorkflowSegmentRunner'
+
+const WAIT_UNITS: { value: WaitUnit; label: string }[] = [
+  { value: 'seconds', label: 'Seconds' },
+  { value: 'minutes', label: 'Minutes' },
+  { value: 'days', label: 'Days' },
+]
 
 // ---- Node definitions ----
 
@@ -40,7 +48,7 @@ const NODE_TYPES_META = [
   { type: 'condition', label: 'If / Then', icon: GitBranch, color: 'bg-orange-500', border: 'border-orange-200', description: 'Branch on a condition' },
   { type: 'task', label: 'Create Task', icon: Zap, color: 'bg-green-600', border: 'border-green-200', description: 'Create a CRM task' },
   { type: 'updatescore', label: 'Update Lead Score', icon: ArrowUpCircle, color: 'bg-pink-600', border: 'border-pink-200', description: 'Adjust contact lead score' },
-  { type: 'movedeal', label: 'Move Deal Stage', icon: MoveRight, color: 'bg-indigo-600', border: 'border-indigo-200', description: 'Change deal pipeline stage' },
+  { type: 'moveopportunity', label: 'Move Opportunity Stage', icon: MoveRight, color: 'bg-indigo-600', border: 'border-indigo-200', description: 'Change opportunity pipeline stage' },
   { type: 'sms', label: 'Send SMS', icon: MessageSquare, color: 'bg-teal-600', border: 'border-teal-200', description: 'Send a text message' },
   { type: 'webhook', label: 'Webhook', icon: Webhook, color: 'bg-zinc-700', border: 'border-zinc-200', description: 'Call an external endpoint' },
   { type: 'enroll', label: 'Enroll in Workflow', icon: Users, color: 'bg-cyan-600', border: 'border-cyan-200', description: 'Add contact to another workflow' },
@@ -79,14 +87,24 @@ function BaseNode({ id, data, type }: { id: string; data: NodeData; type: string
 
       {/* Config preview */}
       <div className="px-3 py-2 text-zinc-500 text-xs leading-relaxed">
-        {data.config && Object.keys(data.config).length > 0
-          ? Object.entries(data.config).slice(0, 2).map(([k, v]) => (
-              <div key={k} className="truncate">
-                <span className="text-zinc-400 capitalize">{k}: </span>{v}
-              </div>
-            ))
-          : <span className="italic text-zinc-300">Click to configure…</span>
-        }
+        {type === 'wait' ? (
+          formatWaitLabel(data.config ?? {}) ? (
+            <div className="truncate">
+              <span className="text-zinc-400">Wait: </span>
+              {formatWaitLabel(data.config ?? {})}
+            </div>
+          ) : (
+            <span className="italic text-zinc-300">Click to configure…</span>
+          )
+        ) : data.config && Object.keys(data.config).length > 0 ? (
+          Object.entries(data.config).slice(0, 2).map(([k, v]) => (
+            <div key={k} className="truncate">
+              <span className="text-zinc-400 capitalize">{k}: </span>{v}
+            </div>
+          ))
+        ) : (
+          <span className="italic text-zinc-300">Click to configure…</span>
+        )}
       </div>
 
       {/* Handles */}
@@ -130,14 +148,19 @@ function ConfigPanel({
 }) {
   const type = node.type as WorkflowNodeType
   const meta = metaByType[type]
-  const [config, setConfig] = useState<Record<string, string>>(
-    (node.data as NodeData).config ?? {}
-  )
+  const [config, setConfig] = useState<Record<string, string>>(() => {
+    const c = (node.data as NodeData).config ?? {}
+    if (node.type === 'wait') {
+      const { duration, unit } = normalizeWaitConfig(c)
+      return { duration, unit }
+    }
+    return c
+  })
 
   const fields: { key: string; label: string; type?: string; options?: string[]; dynamicOptions?: { value: string; label: string }[] }[] = []
 
   if (type === 'trigger') {
-    fields.push({ key: 'event', label: 'Trigger Event', options: ['Manual', 'Segment Assignment', 'Contact Created', 'Deal Created', 'Deal Stage Changed', 'Contact Enriched', 'Form Submitted'] })
+    fields.push({ key: 'event', label: 'Trigger Event', options: ['Manual', 'Segment Assignment', 'Contact Created', 'Opportunity Created', 'Opportunity Stage Changed', 'Contact Enriched', 'Form Submitted', 'Deal Created', 'Deal Stage Changed'] })
     if (config.event === 'Segment Assignment') {
       fields.push({
         key: 'segmentId', label: 'Triggered by segment',
@@ -147,8 +170,6 @@ function ConfigPanel({
   } else if (type === 'email') {
     fields.push({ key: 'subject', label: 'Subject' })
     fields.push({ key: 'body', label: 'Body', type: 'textarea' })
-  } else if (type === 'wait') {
-    fields.push({ key: 'days', label: 'Days to wait', type: 'number' })
   } else if (type === 'condition') {
     fields.push({ key: 'field', label: 'Contact field', options: ['leadScore', 'title', 'company', 'email', 'enriched'] })
     fields.push({ key: 'operator', label: 'Operator', options: ['equals', 'contains', 'greater than', 'less than', 'is set'] })
@@ -167,7 +188,7 @@ function ConfigPanel({
     })
   } else if (type === 'updatescore') {
     fields.push({ key: 'delta', label: 'Score change (e.g. +10 or -5)' })
-  } else if (type === 'movedeal') {
+  } else if (type === 'moveopportunity') {
     fields.push({ key: 'stage', label: 'Target stage', options: ['Prospect', 'Qualified', 'Proposal', 'Closed Won', 'Closed Lost'] })
   } else if (type === 'sms') {
     fields.push({ key: 'message', label: 'Message', type: 'textarea' })
@@ -194,6 +215,31 @@ function ConfigPanel({
         <button onClick={onClose}><X className="w-4 h-4 text-zinc-400 hover:text-zinc-700" /></button>
       </div>
       <div className="p-4 space-y-3">
+        {type === 'wait' && (
+          <div>
+            <label className="block text-xs font-medium text-zinc-700 mb-1">Wait duration</label>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={config.duration ?? ''}
+                onChange={(e) => setConfig({ ...config, duration: e.target.value })}
+                placeholder="0"
+                className="flex-1 rounded-lg border border-zinc-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
+              />
+              <select
+                value={config.unit ?? 'days'}
+                onChange={(e) => setConfig({ ...config, unit: e.target.value })}
+                className="w-28 rounded-lg border border-zinc-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 bg-white"
+              >
+                {WAIT_UNITS.map(u => (
+                  <option key={u.value} value={u.value}>{u.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
         {fields.map((f) => (
           <div key={f.key}>
             <label className="block text-xs font-medium text-zinc-700 mb-1">{f.label}</label>
@@ -232,7 +278,14 @@ function ConfigPanel({
           </div>
         ))}
         <button
-          onClick={() => { onUpdate(node.id, config); onClose() }}
+          onClick={() => {
+            const toSave =
+              type === 'wait'
+                ? { duration: config.duration ?? '', unit: config.unit ?? 'days' }
+                : config
+            onUpdate(node.id, toSave)
+            onClose()
+          }}
           className="w-full rounded-lg bg-zinc-900 py-2 text-sm font-medium text-white hover:bg-zinc-700 transition-colors"
         >
           Apply
@@ -252,11 +305,12 @@ type Props = {
   users: { id: string; name: string }[]
   segments: { id: string; name: string }[]
   forms: { id: string; name: string }[]
+  segmentLinks: { id: string; segment: { id: string; name: string } }[]
 }
 
 let nodeIdCounter = 100
 
-export default function WorkflowCanvas({ sequenceId, initialNodes, initialEdges, isActive: initialActive, users, segments, forms }: Props) {
+export default function WorkflowCanvas({ sequenceId, initialNodes, initialEdges, isActive: initialActive, users, segments, forms, segmentLinks }: Props) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
   const [saving, setSaving] = useState(false)
@@ -350,6 +404,8 @@ export default function WorkflowCanvas({ sequenceId, initialNodes, initialEdges,
 
         {/* Top-right action bar */}
         <Panel position="top-right" className="flex items-center gap-2">
+          <WorkflowSegmentRunner segmentLinks={segmentLinks} />
+
           <button
             onClick={() => setPaletteOpen((v) => !v)}
             className="flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 shadow-sm"

@@ -9,25 +9,51 @@ import { Users, Building2, TrendingUp, CheckCircle2 } from 'lucide-react'
 const STAGES = ['Prospect', 'Qualified', 'Proposal', 'Closed Won', 'Closed Lost']
 
 export default async function DashboardPage() {
-  const [contacts, companies, deals, activities] = await Promise.all([
-    prisma.contact.findMany({ include: { deals: true, activities: true } }),
-    prisma.company.findMany(),
-    prisma.deal.findMany(),
-    prisma.activity.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }),
+  const since = new Date()
+  since.setDate(since.getDate() - 14)
+
+  const [contactsCount, companiesCount, opportunityByStage, hotContacts, activities] = await Promise.all([
+    prisma.contact.count(),
+    prisma.company.count(),
+    prisma.opportunity.groupBy({
+      by: ['stage'],
+      _count: { _all: true },
+      _sum: { value: true },
+    }),
+    prisma.contact.findMany({
+      orderBy: { leadScore: 'desc' },
+      take: 5,
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        leadScore: true,
+        opportunities: { select: { closedAt: true } },
+        _count: { select: { activities: true } },
+      },
+    }),
+    prisma.activity.findMany({
+      where: { createdAt: { gte: since } },
+      select: { createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    }),
   ])
 
-  const wonDeals = deals.filter((d) => d.stage === 'Closed Won')
-  const pipelineValue = deals
+  const stageMap = new Map(
+    opportunityByStage.map((row) => [row.stage, { count: row._count._all, value: row._sum.value ?? 0 }]),
+  )
+
+  const pipelineValue = opportunityByStage
     .filter((d) => d.stage !== 'Closed Lost' && d.stage !== 'Closed Won')
-    .reduce((s, d) => s + d.value, 0)
-  const wonValue = wonDeals.reduce((s, d) => s + d.value, 0)
+    .reduce((sum, d) => sum + (d._sum.value ?? 0), 0)
+  const wonValue = stageMap.get('Closed Won')?.value ?? 0
 
   const funnelData = STAGES.map((stage) => {
-    const stageDeals = deals.filter((d) => d.stage === stage)
+    const row = stageMap.get(stage)
     return {
       stage,
-      count: stageDeals.length,
-      value: stageDeals.reduce((s, d) => s + d.value, 0),
+      count: row?.count ?? 0,
+      value: row?.value ?? 0,
     }
   })
 
@@ -43,15 +69,11 @@ export default async function DashboardPage() {
     return { date: label, count }
   })
 
-  const hotContacts = contacts
-    .sort((a, b) => b.leadScore - a.leadScore)
-    .slice(0, 5)
-
   const stats = [
-    { label: 'Contacts', value: contacts.length, icon: Users, href: '/contacts' },
-    { label: 'Companies', value: companies.length, icon: Building2, href: '/companies' },
-    { label: 'Open Pipeline', value: `$${pipelineValue.toLocaleString()}`, icon: TrendingUp, href: '/deals' },
-    { label: 'Closed Won', value: `$${wonValue.toLocaleString()}`, icon: CheckCircle2, href: '/deals' },
+    { label: 'Contacts', value: contactsCount, icon: Users, href: '/contacts' },
+    { label: 'Companies', value: companiesCount, icon: Building2, href: '/companies' },
+    { label: 'Open Pipeline', value: `$${pipelineValue.toLocaleString()}`, icon: TrendingUp, href: '/opportunities' },
+    { label: 'Closed Won', value: `$${wonValue.toLocaleString()}`, icon: CheckCircle2, href: '/opportunities' },
   ]
 
   return (
@@ -74,7 +96,7 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-2 gap-6 mb-6">
         {/* Funnel */}
         <div className="bg-white rounded-xl border border-zinc-200 p-6">
-          <h2 className="font-semibold mb-4">Deal Funnel</h2>
+          <h2 className="font-semibold mb-4">Opportunity Funnel</h2>
           <FunnelChart data={funnelData} />
         </div>
 
@@ -94,13 +116,13 @@ export default async function DashboardPage() {
               <th className="text-left py-2 font-medium text-zinc-500">Contact</th>
               <th className="text-left py-2 font-medium text-zinc-500">Score</th>
               <th className="text-left py-2 font-medium text-zinc-500">Activities</th>
-              <th className="text-left py-2 font-medium text-zinc-500">Open Deals</th>
+              <th className="text-left py-2 font-medium text-zinc-500">Open Opportunities</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-50">
             {hotContacts.map((c) => {
               const { label, color } = scoreLabel(c.leadScore)
-              const openDeals = c.deals.filter((d) => !d.closedAt).length
+              const openOpportunities = c.opportunities.filter((d) => !d.closedAt).length
               return (
                 <tr key={c.id} className="hover:bg-zinc-50">
                   <td className="py-2">
@@ -111,8 +133,8 @@ export default async function DashboardPage() {
                   <td className="py-2">
                     <span className={`font-semibold ${color}`}>{c.leadScore} · {label}</span>
                   </td>
-                  <td className="py-2 text-zinc-500">{c.activities.length}</td>
-                  <td className="py-2 text-zinc-500">{openDeals}</td>
+                  <td className="py-2 text-zinc-500">{c._count.activities}</td>
+                  <td className="py-2 text-zinc-500">{openOpportunities}</td>
                 </tr>
               )
             })}

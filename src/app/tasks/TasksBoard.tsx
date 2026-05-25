@@ -2,11 +2,13 @@
 
 import { useState, useTransition } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
-  Plus, Trash2, Check, X, Loader2, ChevronDown, ChevronRight,
-  Flag, Calendar, User, Tag, Building2, Users,
+  Plus, Trash2, Check, X, Loader2, ChevronRight,
+  Calendar, User, Building2, Filter, TrendingUp, ClipboardList,
 } from 'lucide-react'
-import { createTask, updateTask, updateTaskStatus, deleteTask } from '@/app/actions'
+import { createTask, updateTask, updateTaskStatus, deleteTask, deleteTasks } from '@/app/actions'
+import { isFillFormTask, parseFormIdFromTask, formFillUrl } from '@/lib/formTasks'
 
 type TaskRecord = {
   id: string
@@ -18,12 +20,12 @@ type TaskRecord = {
   assigneeId: string | null
   contactId: string | null
   companyId: string | null
-  dealId: string | null
+  opportunityId: string | null
   segmentId: string | null
   assignee: { id: string; name: string; color: string } | null
   contact: { id: string; firstName: string; lastName: string } | null
   company: { id: string; name: string } | null
-  deal: { id: string; name: string } | null
+  opportunity: { id: string; name: string } | null
 }
 
 type Props = {
@@ -32,14 +34,30 @@ type Props = {
   segments: { id: string; name: string; objectType: string }[]
   contacts: { id: string; firstName: string; lastName: string }[]
   companies: { id: string; name: string }[]
-  deals: { id: string; name: string }[]
+  opportunities: { id: string; name: string }[]
 }
 
 const COLUMNS = [
-  { key: 'todo',        label: 'To Do',       color: 'bg-zinc-100 text-zinc-600'  },
+  { key: 'not_started', label: 'Not Started',  color: 'bg-zinc-50 text-zinc-500'   },
+  { key: 'todo',        label: 'To Do',        color: 'bg-zinc-100 text-zinc-600'  },
   { key: 'in_progress', label: 'In Progress',  color: 'bg-blue-100 text-blue-700'  },
-  { key: 'done',        label: 'Done',         color: 'bg-green-100 text-green-700'},
+  { key: 'done',        label: 'Done',         color: 'bg-green-100 text-green-700' },
 ]
+
+type LinkMode = 'none' | 'segment' | 'record'
+type RecordKind = 'contact' | 'company' | 'opportunity'
+
+function inferLinkMode(initial?: TaskRecord): LinkMode {
+  if (initial?.segmentId) return 'segment'
+  if (initial?.contactId || initial?.companyId || initial?.opportunityId) return 'record'
+  return 'none'
+}
+
+function inferRecordKind(initial?: TaskRecord): RecordKind {
+  if (initial?.companyId) return 'company'
+  if (initial?.opportunityId) return 'opportunity'
+  return 'contact'
+}
 
 const PRIORITIES: Record<string, { label: string; color: string; dot: string }> = {
   low:    { label: 'Low',    color: 'text-zinc-400',   dot: 'bg-zinc-400'  },
@@ -57,14 +75,14 @@ function Avatar({ name, color, size = 6 }: { name: string; color: string; size?:
 }
 
 function TaskForm({
-  users, segments, contacts, companies, deals,
+  users, segments, contacts, companies, opportunities,
   initial, onDone, defaultStatus,
 }: {
   users: Props['users']
   segments: Props['segments']
   contacts: Props['contacts']
   companies: Props['companies']
-  deals: Props['deals']
+  opportunities: Props['opportunities']
   initial?: TaskRecord
   onDone: () => void
   defaultStatus?: string
@@ -75,11 +93,30 @@ function TaskForm({
   const [priority, setPriority] = useState(initial?.priority ?? 'medium')
   const [dueDate, setDueDate] = useState(initial?.dueDate ? initial.dueDate.slice(0, 10) : '')
   const [assigneeId, setAssigneeId] = useState(initial?.assigneeId ?? '')
+  const [linkMode, setLinkMode] = useState<LinkMode>(() => inferLinkMode(initial))
+  const [recordKind, setRecordKind] = useState<RecordKind>(() => inferRecordKind(initial))
   const [contactId, setContactId] = useState(initial?.contactId ?? '')
   const [companyId, setCompanyId] = useState(initial?.companyId ?? '')
-  const [dealId, setDealId] = useState(initial?.dealId ?? '')
+  const [opportunityId, setOpportunityId] = useState(initial?.opportunityId ?? '')
   const [segmentId, setSegmentId] = useState(initial?.segmentId ?? '')
   const [isPending, startTransition] = useTransition()
+
+  function onLinkModeChange(mode: LinkMode) {
+    setLinkMode(mode)
+    if (mode !== 'segment') setSegmentId('')
+    if (mode !== 'record') {
+      setContactId('')
+      setCompanyId('')
+      setOpportunityId('')
+    }
+  }
+
+  function onRecordKindChange(kind: RecordKind) {
+    setRecordKind(kind)
+    setContactId('')
+    setCompanyId('')
+    setOpportunityId('')
+  }
 
   function submit() {
     startTransition(async () => {
@@ -87,11 +124,11 @@ function TaskForm({
         title, description: description || undefined,
         status, priority,
         dueDate: dueDate || undefined,
-        assigneeId: assigneeId || undefined,
-        contactId: contactId || undefined,
-        companyId: companyId || undefined,
-        dealId: dealId || undefined,
-        segmentId: segmentId || undefined,
+        assigneeId: assigneeId || null,
+        contactId: linkMode === 'record' && recordKind === 'contact' ? (contactId || null) : null,
+        companyId: linkMode === 'record' && recordKind === 'company' ? (companyId || null) : null,
+        opportunityId: linkMode === 'record' && recordKind === 'opportunity' ? (opportunityId || null) : null,
+        segmentId: linkMode === 'segment' ? (segmentId || null) : null,
       }
       if (initial) {
         await updateTask(initial.id, data)
@@ -141,36 +178,68 @@ function TaskForm({
       </div>
 
       <details className="text-sm">
-        <summary className="cursor-pointer text-zinc-500 hover:text-zinc-700 text-xs font-medium select-none">Link to record (optional)</summary>
-        <div className="grid grid-cols-2 gap-2 mt-2">
+        <summary className="cursor-pointer text-zinc-500 hover:text-zinc-700 text-xs font-medium select-none">Link (optional)</summary>
+        <div className="mt-2 space-y-2">
           <div>
-            <label className="block text-xs text-zinc-500 mb-1">Contact</label>
-            <select value={contactId} onChange={e => setContactId(e.target.value)} className={sel}>
-              <option value="">—</option>
-              {contacts.map(c => <option key={c.id} value={c.id}>{c.firstName} {c.lastName}</option>)}
+            <label className="block text-xs text-zinc-500 mb-1">Link type</label>
+            <select
+              value={linkMode}
+              onChange={e => onLinkModeChange(e.target.value as LinkMode)}
+              className={sel}
+            >
+              <option value="none">No link</option>
+              <option value="segment">Segment list</option>
+              <option value="record">Record</option>
             </select>
           </div>
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Company</label>
-            <select value={companyId} onChange={e => setCompanyId(e.target.value)} className={sel}>
-              <option value="">—</option>
-              {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Deal</label>
-            <select value={dealId} onChange={e => setDealId(e.target.value)} className={sel}>
-              <option value="">—</option>
-              {deals.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Segment</label>
-            <select value={segmentId} onChange={e => setSegmentId(e.target.value)} className={sel}>
-              <option value="">—</option>
-              {segments.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </div>
+          {linkMode === 'segment' && (
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">Segment</label>
+              <select value={segmentId} onChange={e => setSegmentId(e.target.value)} className={sel}>
+                <option value="">Select a segment…</option>
+                {segments.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          )}
+          {linkMode === 'record' && (
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Record type</label>
+                <select
+                  value={recordKind}
+                  onChange={e => onRecordKindChange(e.target.value as RecordKind)}
+                  className={sel}
+                >
+                  <option value="contact">Contact</option>
+                  <option value="company">Company</option>
+                  <option value="opportunity">Opportunity</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">
+                  {recordKind === 'contact' ? 'Contact' : recordKind === 'company' ? 'Company' : 'Opportunity'}
+                </label>
+                {recordKind === 'contact' && (
+                  <select value={contactId} onChange={e => setContactId(e.target.value)} className={sel}>
+                    <option value="">Select…</option>
+                    {contacts.map(c => <option key={c.id} value={c.id}>{c.firstName} {c.lastName}</option>)}
+                  </select>
+                )}
+                {recordKind === 'company' && (
+                  <select value={companyId} onChange={e => setCompanyId(e.target.value)} className={sel}>
+                    <option value="">Select…</option>
+                    {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                )}
+                {recordKind === 'opportunity' && (
+                  <select value={opportunityId} onChange={e => setOpportunityId(e.target.value)} className={sel}>
+                    <option value="">Select…</option>
+                    {opportunities.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </details>
 
@@ -189,12 +258,19 @@ function TaskForm({
 }
 
 function TaskCard({
-  task, users, segments, contacts, companies, deals,
+  task, users, segments, contacts, companies, opportunities,
 }: { task: TaskRecord } & Omit<Props, 'tasks'>) {
+  const router = useRouter()
   const [expanded, setExpanded] = useState(false)
   const [editing, setEditing] = useState(false)
   const [isPending, startTransition] = useTransition()
   const pri = PRIORITIES[task.priority] ?? PRIORITIES.medium
+  const formId = parseFormIdFromTask(task)
+  const isFormTask = isFillFormTask(task) && !!formId
+
+  function openForm() {
+    if (formId) router.push(formFillUrl(formId, task.id))
+  }
 
   function moveStatus(status: string) {
     startTransition(async () => { await updateTaskStatus(task.id, status) })
@@ -209,20 +285,34 @@ function TaskCard({
     return (
       <TaskForm
         initial={task} users={users} segments={segments}
-        contacts={contacts} companies={companies} deals={deals}
+        contacts={contacts} companies={companies} opportunities={opportunities}
         onDone={() => setEditing(false)}
       />
     )
   }
 
   return (
-    <div className="bg-white rounded-xl border border-zinc-200 p-3 group hover:border-zinc-300 transition-colors cursor-pointer"
-      onClick={() => setExpanded(e => !e)}>
+    <div
+      className={`bg-white rounded-xl border p-3 group transition-colors ${
+        isFormTask
+          ? 'border-violet-200 hover:border-violet-400 cursor-pointer ring-1 ring-violet-50'
+          : 'border-zinc-200 hover:border-zinc-300 cursor-pointer'
+      }`}
+      onClick={() => (isFormTask ? openForm() : setExpanded(e => !e))}
+    >
       <div className="flex items-start gap-2">
         <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${pri.dot}`} />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-zinc-900 leading-snug">{task.title}</p>
-          {task.description && !expanded && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-medium text-zinc-900 leading-snug">{task.title}</p>
+            {isFormTask && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">
+                <ClipboardList className="w-3 h-3" />
+                Click to fill
+              </span>
+            )}
+          </div>
+          {task.description && !expanded && !isFormTask && (
             <p className="text-xs text-zinc-400 mt-0.5 truncate">{task.description}</p>
           )}
           {expanded && task.description && (
@@ -253,14 +343,31 @@ function TaskCard({
                 <Building2 className="w-3 h-3" />{task.company.name}
               </Link>
             )}
+            {task.opportunity && (
+              <Link href="/opportunities" onClick={e => e.stopPropagation()}
+                className="flex items-center gap-1 text-xs text-amber-600 hover:underline">
+                <TrendingUp className="w-3 h-3" />{task.opportunity.name}
+              </Link>
+            )}
             {task.segmentId && (
-              <span className="flex items-center gap-1 text-xs text-emerald-600">
-                <Users className="w-3 h-3" />{segments.find(s => s.id === task.segmentId)?.name ?? 'Segment'}
-              </span>
+              <Link href={`/segments/${task.segmentId}`} onClick={e => e.stopPropagation()}
+                className="flex items-center gap-1 text-xs text-emerald-600 hover:underline">
+                <Filter className="w-3 h-3" />
+                {segments.find(s => s.id === task.segmentId)?.name ?? 'Segment'}
+              </Link>
             )}
           </div>
         </div>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={e => e.stopPropagation()}>
+          {isFormTask && (
+            <button
+              onClick={() => setExpanded(e => !e)}
+              className="p-1 rounded text-violet-500 hover:text-violet-700 hover:bg-violet-50"
+              title="Status options"
+            >
+              <ChevronRight className={`w-3.5 h-3.5 transition-transform ${expanded ? 'rotate-90' : ''}`} />
+            </button>
+          )}
           <button onClick={() => setEditing(true)} className="p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100">
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
@@ -288,10 +395,12 @@ function TaskCard({
   )
 }
 
-export default function TasksBoard({ tasks: initialTasks, users, segments, contacts, companies, deals }: Props) {
+export default function TasksBoard({ tasks: initialTasks, users, segments, contacts, companies, opportunities }: Props) {
   const [addingCol, setAddingCol] = useState<string | null>(null)
+  const [deletingCol, setDeletingCol] = useState<string | null>(null)
   const [filterAssignee, setFilterAssignee] = useState('')
   const [filterPriority, setFilterPriority] = useState('')
+  const [isBulkPending, startBulkTransition] = useTransition()
 
   const filtered = initialTasks.filter(t => {
     if (filterAssignee && t.assigneeId !== filterAssignee) return false
@@ -300,6 +409,17 @@ export default function TasksBoard({ tasks: initialTasks, users, segments, conta
   })
 
   const byStatus = (status: string) => filtered.filter(t => t.status === status)
+
+  function deleteColumn(status: string, label: string) {
+    const ids = byStatus(status).map(t => t.id)
+    if (ids.length === 0) return
+    if (!confirm(`Delete all ${ids.length} task${ids.length !== 1 ? 's' : ''} in "${label}"?`)) return
+    setDeletingCol(status)
+    startBulkTransition(async () => {
+      await deleteTasks(ids)
+      setDeletingCol(null)
+    })
+  }
 
   const sel = 'rounded-lg border border-zinc-300 px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-zinc-900'
 
@@ -340,10 +460,30 @@ export default function TasksBoard({ tasks: initialTasks, users, segments, conta
                 <div className="flex items-center gap-2 mb-3 px-1">
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${col.color}`}>{col.label}</span>
                   <span className="text-xs text-zinc-400 font-medium">{colTasks.length}</span>
-                  <button onClick={() => setAddingCol(col.key)}
-                    className="ml-auto p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 transition-colors">
-                    <Plus className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="ml-auto flex items-center gap-0.5">
+                    {colTasks.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => deleteColumn(col.key, col.label)}
+                        disabled={isBulkPending && deletingCol === col.key}
+                        title={`Delete all tasks in ${col.label}`}
+                        className="p-1 rounded text-zinc-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50"
+                      >
+                        {isBulkPending && deletingCol === col.key
+                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          : <Trash2 className="w-3.5 h-3.5" />
+                        }
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setAddingCol(col.key)}
+                      title={`Add task to ${col.label}`}
+                      className="p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Add form */}
@@ -351,7 +491,7 @@ export default function TasksBoard({ tasks: initialTasks, users, segments, conta
                   <div className="mb-3">
                     <TaskForm
                       defaultStatus={col.key} users={users} segments={segments}
-                      contacts={contacts} companies={companies} deals={deals}
+                      contacts={contacts} companies={companies} opportunities={opportunities}
                       onDone={() => setAddingCol(null)}
                     />
                   </div>
@@ -366,7 +506,7 @@ export default function TasksBoard({ tasks: initialTasks, users, segments, conta
                   )}
                   {colTasks.map(task => (
                     <TaskCard key={task.id} task={task} users={users} segments={segments}
-                      contacts={contacts} companies={companies} deals={deals} />
+                      contacts={contacts} companies={companies} opportunities={opportunities} />
                   ))}
                 </div>
               </div>

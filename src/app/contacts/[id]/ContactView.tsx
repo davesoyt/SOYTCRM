@@ -14,7 +14,7 @@ const FIELD_DEFS = [
   { key: 'location', label: 'Location / Address' },
   { key: 'leadScore', label: 'Lead Score' },
   { key: 'company', label: 'Company' },
-  { key: 'deals', label: 'Deals' },
+  { key: 'deals', label: 'Opportunities' },
   { key: 'sequences', label: 'Sequences' },
   { key: 'activityLog', label: 'Log Activity' },
   { key: 'timeline', label: 'Activity Timeline' },
@@ -42,8 +42,8 @@ type Props = {
     lat: number | null
     lng: number | null
     company: { id: string; name: string; industry: string | null; size: string | null } | null
-    activities: { id: string; type: string; title: string; body: string | null; createdAt: Date; dealId?: string | null }[]
-    deals: { id: string; name: string; stage: string; value: number }[]
+    activities: { id: string; type: string; title: string; body: string | null; createdAt: Date; opportunityId?: string | null }[]
+    opportunities: { id: string; name: string; stage: string; value: number }[]
     enrollments: { id: string; active: boolean; currentStep: number; sequenceId: string; startedAt: Date; sequence: { id: string; name: string } }[]
     tasks: { id: string; title: string; status: string; dueDate: Date | null; createdAt: Date }[]
   }
@@ -320,7 +320,7 @@ export default function ContactView({ contact, sequences, scoreLabel, scoreColor
                   title: a.title,
                   body: a.body,
                   createdAt: a.createdAt.toISOString(),
-                  dealId: a.dealId ?? null,
+                  opportunityId: a.opportunityId ?? null,
                 }))}
                 tasks={contact.tasks.map(t => ({
                   id: t.id,
@@ -365,10 +365,10 @@ export default function ContactView({ contact, sequences, scoreLabel, scoreColor
 
           {fields.deals && (
             <div className="bg-white rounded-xl border border-zinc-200 p-5">
-              <h2 className="font-semibold mb-3">Deals</h2>
-              {contact.deals.length ? (
+              <h2 className="font-semibold mb-3">Opportunities</h2>
+              {contact.opportunities.length ? (
                 <ul className="space-y-2">
-                  {contact.deals.map(d => (
+                  {contact.opportunities.map(d => (
                     <li key={d.id} className="text-sm">
                       <span className="font-medium">{d.name}</span>
                       <div className="flex items-center gap-2 text-xs text-zinc-500 mt-0.5">
@@ -379,7 +379,7 @@ export default function ContactView({ contact, sequences, scoreLabel, scoreColor
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm text-zinc-400">No deals yet.</p>
+                <p className="text-sm text-zinc-400">No opportunities yet.</p>
               )}
             </div>
           )}

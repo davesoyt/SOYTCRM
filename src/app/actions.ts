@@ -4,6 +4,17 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { computeLeadScore } from '@/lib/scoring'
+import {
+  applyFilters,
+  parseObjectTypes,
+  memberKey,
+  type SegmentFilter,
+} from '@/lib/filters'
+import {
+  filterValidObjectTypes,
+  serializeSegmentObjectTypes,
+} from '@/lib/segmentObjects'
+import { loadRecordsForType } from '@/lib/segmentData'
 import Anthropic from '@anthropic-ai/sdk'
 
 const STAGES = ['Prospect', 'Qualified', 'Proposal', 'Closed Won', 'Closed Lost']
@@ -50,7 +61,7 @@ export async function logActivity(formData: FormData) {
 async function refreshContactScore(contactId: string) {
   const contact = await prisma.contact.findUnique({
     where: { id: contactId },
-    include: { activities: true, deals: true },
+    include: { activities: true, opportunities: true },
   })
   if (!contact) return
   const score = computeLeadScore(contact)
@@ -73,10 +84,10 @@ export async function createCompany(formData: FormData) {
   redirect(`/companies/${company.id}`)
 }
 
-// --- Deals ---
+// --- Opportunities ---
 
-export async function createDeal(formData: FormData) {
-  const deal = await prisma.deal.create({
+export async function createOpportunity(formData: FormData) {
+  const opportunity = await prisma.opportunity.create({
     data: {
       name: formData.get('name') as string,
       value: parseFloat(formData.get('value') as string) || 0,
@@ -89,31 +100,31 @@ export async function createDeal(formData: FormData) {
   if (contactId) {
     await prisma.activity.create({
       data: {
-        type: 'deal_created',
-        title: `Deal "${deal.name}" created`,
+        type: 'opportunity_created',
+        title: `Opportunity "${opportunity.name}" created`,
         contactId,
-        dealId: deal.id,
+        opportunityId: opportunity.id,
       },
     })
     await refreshContactScore(contactId)
   }
-  revalidatePath('/deals')
+  revalidatePath('/opportunities')
 }
 
-export async function moveDeal(dealId: string, newStage: string) {
-  const deal = await prisma.deal.findUnique({
-    where: { id: dealId },
+export async function moveOpportunity(opportunityId: string, newStage: string) {
+  const opportunity = await prisma.opportunity.findUnique({
+    where: { id: opportunityId },
     include: { pipeline: true },
   })
-  if (!deal) return
+  if (!opportunity) return
 
   // Pipeline-aware stage validation
   let validStageLabels: string[] = STAGES
   let isClosedWon = newStage === 'Closed Won'
   let isClosedLost = newStage === 'Closed Lost'
-  if (deal.pipeline) {
+  if (opportunity.pipeline) {
     try {
-      const pipelineStages = JSON.parse(deal.pipeline.stages) as Array<{
+      const pipelineStages = JSON.parse(opportunity.pipeline.stages) as Array<{
         key: string
         label: string
         order: number
@@ -131,20 +142,20 @@ export async function moveDeal(dealId: string, newStage: string) {
   if (!validStageLabels.includes(newStage)) return
 
   const closedAt = isClosedWon || isClosedLost ? new Date() : null
-  await prisma.deal.update({
-    where: { id: dealId },
+  await prisma.opportunity.update({
+    where: { id: opportunityId },
     data: { stage: newStage, closedAt },
   })
-  if (deal.contactId) {
+  if (opportunity.contactId) {
     await prisma.activity.create({
       data: {
         type: 'stage_change',
-        title: `Deal moved to ${newStage}`,
-        contactId: deal.contactId,
-        dealId,
+        title: `Opportunity moved to ${newStage}`,
+        contactId: opportunity.contactId,
+        opportunityId,
       },
     })
-    await refreshContactScore(deal.contactId)
+    await refreshContactScore(opportunity.contactId)
   }
   // Notify everyone on closed won
   if (isClosedWon) {
@@ -153,16 +164,16 @@ export async function moveDeal(dealId: string, newStage: string) {
       await prisma.notification.create({
         data: {
           userId: u.id,
-          type: 'deal',
-          title: `Deal closed won: ${deal.name}`,
-          body: `$${deal.value.toLocaleString()}`,
-          link: '/deals',
+          type: 'opportunity',
+          title: `Opportunity closed won: ${opportunity.name}`,
+          body: `$${opportunity.value.toLocaleString()}`,
+          link: '/opportunities',
         },
       })
     }
   }
-  revalidatePath('/deals')
-  revalidatePath(`/contacts/${deal.contactId}`)
+  revalidatePath('/opportunities')
+  revalidatePath(`/contacts/${opportunity.contactId}`)
 }
 
 // --- Sequences ---
@@ -198,10 +209,30 @@ export async function toggleSequenceActive(sequenceId: string, isActive: boolean
   revalidatePath('/sequences')
 }
 
+export async function deleteSequence(sequenceId: string) {
+  await prisma.enrollment.deleteMany({ where: { sequenceId } })
+  await prisma.sequence.delete({ where: { id: sequenceId } })
+  revalidatePath('/sequences')
+  redirect('/sequences')
+}
+
 export async function enrollContact(formData: FormData) {
   const contactId = formData.get('contactId') as string
   const sequenceId = formData.get('sequenceId') as string
-  await prisma.enrollment.create({ data: { contactId, sequenceId } })
+  const contact = await prisma.contact.findUnique({
+    where: { id: contactId },
+    select: { firstName: true, lastName: true },
+  })
+  const recordLabel = contact ? `${contact.firstName} ${contact.lastName}` : contactId
+  const enrollment = await prisma.enrollment.create({
+    data: {
+      contactId,
+      sequenceId,
+      recordType: 'contact',
+      recordId: contactId,
+      recordLabel,
+    },
+  })
   await prisma.activity.create({
     data: {
       type: 'sequence_enrolled',
@@ -209,8 +240,36 @@ export async function enrollContact(formData: FormData) {
       contactId,
     },
   })
+  await prisma.workflowRunLog.create({
+    data: {
+      enrollmentId: enrollment.id,
+      stepIndex: 0,
+      nodeType: 'enrolled',
+      nodeLabel: 'Enrolled',
+      dataJson: JSON.stringify({ event: 'Contact enrolled manually', contactId }),
+      status: 'completed',
+    },
+  })
   revalidatePath(`/contacts/${contactId}`)
   revalidatePath('/sequences')
+  revalidatePath('/sequences/history')
+
+  const { sequenceHasCanvasWorkflow, advanceWorkflowEnrollment } = await import('@/lib/workflowEngine')
+  const seq = await prisma.sequence.findUnique({
+    where: { id: sequenceId },
+    select: { nodesJson: true, edgesJson: true },
+  })
+  if (sequenceHasCanvasWorkflow(seq?.nodesJson ?? '', seq?.edgesJson ?? '')) {
+    await advanceWorkflowEnrollment(enrollment.id)
+  }
+}
+
+/** Resume enrollments whose wait delay has elapsed. */
+export async function tickWorkflows() {
+  const { processDueWorkflowEnrollments } = await import('@/lib/workflowEngine')
+  const processed = await processDueWorkflowEnrollments()
+  revalidatePath('/sequences/history')
+  return { processed }
 }
 
 export async function processSequenceStep(enrollmentId: string) {
@@ -229,6 +288,21 @@ export async function processSequenceStep(enrollmentId: string) {
       where: { id: enrollmentId },
       data: { active: false, completedAt: new Date() },
     })
+    await prisma.workflowRunLog.create({
+      data: {
+        enrollmentId,
+        stepIndex: enrollment.currentStep,
+        nodeType: 'completed',
+        nodeLabel: 'Workflow Completed',
+        dataJson: JSON.stringify({ event: 'All steps completed', completedAt: new Date().toISOString() }),
+        status: 'completed',
+      },
+    })
+    revalidatePath('/sequences/history')
+    return
+  }
+  if (!enrollment.contactId || !enrollment.contact) {
+    // Legacy email-step processor only operates on contact enrollments.
     return
   }
   await prisma.activity.create({
@@ -239,20 +313,45 @@ export async function processSequenceStep(enrollmentId: string) {
       contactId: enrollment.contactId,
     },
   })
+  await prisma.workflowRunLog.create({
+    data: {
+      enrollmentId,
+      stepIndex: enrollment.currentStep,
+      nodeType: 'email',
+      nodeLabel: step.subject,
+      dataJson: JSON.stringify({
+        subject: step.subject,
+        body: step.body,
+        dayOffset: step.dayOffset,
+        to: enrollment.contact.email,
+        contactName: `${enrollment.contact.firstName} ${enrollment.contact.lastName}`,
+      }),
+      status: 'completed',
+    },
+  })
   const nextStep = enrollment.currentStep + 1
-  if (nextStep >= steps.length) {
-    await prisma.enrollment.update({
-      where: { id: enrollmentId },
-      data: { currentStep: nextStep, active: false, completedAt: new Date() },
-    })
-  } else {
-    await prisma.enrollment.update({
-      where: { id: enrollmentId },
-      data: { currentStep: nextStep },
+  const isLast = nextStep >= steps.length
+  await prisma.enrollment.update({
+    where: { id: enrollmentId },
+    data: isLast
+      ? { currentStep: nextStep, active: false, completedAt: new Date() }
+      : { currentStep: nextStep },
+  })
+  if (isLast) {
+    await prisma.workflowRunLog.create({
+      data: {
+        enrollmentId,
+        stepIndex: nextStep,
+        nodeType: 'completed',
+        nodeLabel: 'Workflow Completed',
+        dataJson: JSON.stringify({ event: 'All steps completed', completedAt: new Date().toISOString() }),
+        status: 'completed',
+      },
     })
   }
   await refreshContactScore(enrollment.contactId)
   revalidatePath(`/contacts/${enrollment.contactId}`)
+  revalidatePath('/sequences/history')
 }
 
 // --- AI Enrichment ---
@@ -352,26 +451,60 @@ export async function geocodeContact(contactId: string) {
 // --- Segments ---
 
 export async function createSegment(formData: FormData) {
+  const customDefs = await prisma.customObjectDef.findMany({ select: { id: true } })
+  const customIds = new Set(customDefs.map(d => d.id))
+
+  let objectTypes: string[] = ['contact']
+  const rawTypes = formData.get('objectTypes') as string | null
+  if (rawTypes) {
+    try {
+      const parsed = JSON.parse(rawTypes) as unknown
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        objectTypes = filterValidObjectTypes(
+          parsed.filter((t): t is string => typeof t === 'string'),
+          customIds,
+        )
+      }
+    } catch { /* keep default */ }
+  }
+
   const segment = await prisma.segment.create({
     data: {
       name: formData.get('name') as string,
       description: (formData.get('description') as string) || null,
-      objectType: (formData.get('objectType') as string) || 'contact',
+      objectType: serializeSegmentObjectTypes(objectTypes),
     },
   })
   revalidatePath('/segments')
   redirect(`/segments/${segment.id}`)
 }
 
-export async function saveSegmentFilters(segmentId: string, filtersJson: string, name?: string, description?: string) {
-  await prisma.segment.update({
-    where: { id: segmentId },
-    data: {
-      filtersJson,
-      ...(name !== undefined ? { name } : {}),
-      ...(description !== undefined ? { description } : {}),
-    },
-  })
+export async function saveSegmentFilters(
+  segmentId: string,
+  filtersJson: string,
+  name?: string,
+  description?: string,
+  objectTypesJson?: string,
+) {
+  const data: Record<string, string> = { filtersJson }
+  if (name !== undefined) data.name = name
+  if (description !== undefined) data.description = description
+  if (objectTypesJson !== undefined) {
+    const customDefs = await prisma.customObjectDef.findMany({ select: { id: true } })
+    const customIds = new Set(customDefs.map(d => d.id))
+    let types: string[] = ['contact']
+    try {
+      const parsed = JSON.parse(objectTypesJson) as unknown
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        types = filterValidObjectTypes(
+          parsed.filter((t): t is string => typeof t === 'string'),
+          customIds,
+        )
+      }
+    } catch { /* keep default */ }
+    data.objectType = serializeSegmentObjectTypes(types)
+  }
+  await prisma.segment.update({ where: { id: segmentId }, data })
   revalidatePath(`/segments/${segmentId}`)
   revalidatePath('/segments')
 }
@@ -386,15 +519,16 @@ export async function deleteSegment(segmentId: string) {
 
 export async function searchRecords(query: string) {
   const q = query.trim()
-  if (!q || q.length < 2) return { contacts: [], companies: [], deals: [] }
-  const [contacts, companies, deals] = await Promise.all([
+  if (!q || q.length < 2) return { contacts: [], companies: [], opportunities: [] }
+  const [contacts, companies, opportunities] = await Promise.all([
     prisma.contact.findMany({
       where: {
         OR: [
-          { firstName: { contains: q } },
-          { lastName: { contains: q } },
-          { email: { contains: q } },
-          { title: { contains: q } },
+          { firstName: { contains: q, mode: 'insensitive' } },
+          { lastName: { contains: q, mode: 'insensitive' } },
+          { email: { contains: q, mode: 'insensitive' } },
+          { title: { contains: q, mode: 'insensitive' } },
+          { customFields: { contains: q, mode: 'insensitive' } },
         ],
       },
       include: { company: { select: { name: true } } },
@@ -403,20 +537,26 @@ export async function searchRecords(query: string) {
     prisma.company.findMany({
       where: {
         OR: [
-          { name: { contains: q } },
-          { domain: { contains: q } },
-          { industry: { contains: q } },
+          { name: { contains: q, mode: 'insensitive' } },
+          { domain: { contains: q, mode: 'insensitive' } },
+          { industry: { contains: q, mode: 'insensitive' } },
+          { customFields: { contains: q, mode: 'insensitive' } },
         ],
       },
       take: 6,
     }),
-    prisma.deal.findMany({
-      where: { OR: [{ name: { contains: q } }, { stage: { contains: q } }] },
+    prisma.opportunity.findMany({
+      where: {
+        OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { stage: { contains: q, mode: 'insensitive' } },
+        ],
+      },
       include: { contact: { select: { firstName: true, lastName: true } } },
       take: 6,
     }),
   ])
-  return { contacts, companies, deals }
+  return { contacts, companies, opportunities }
 }
 
 // --- Record Updates ---
@@ -472,36 +612,36 @@ export async function updateCompany(
   revalidatePath('/companies')
 }
 
-export async function updateDeal(
+export async function updateOpportunity(
   id: string,
   data: { name: string; value: number; stage: string },
 ) {
-  await prisma.deal.update({ where: { id }, data })
-  revalidatePath('/deals')
+  await prisma.opportunity.update({ where: { id }, data })
+  revalidatePath('/opportunities')
 }
 
 // --- Bulk Delete ---
 
-export async function clearAllRecords(target: 'contacts' | 'companies' | 'deals') {
+export async function clearAllRecords(target: 'contacts' | 'companies' | 'opportunities') {
   if (target === 'contacts') {
     await prisma.enrollment.deleteMany({})
     await prisma.activity.deleteMany({ where: { contactId: { not: null } } })
-    await prisma.deal.updateMany({ data: { contactId: null } })
+    await prisma.opportunity.updateMany({ data: { contactId: null } })
     await prisma.contact.deleteMany({})
     revalidatePath('/contacts')
     revalidatePath('/dashboard')
   } else if (target === 'companies') {
     await prisma.activity.deleteMany({ where: { companyId: { not: null } } })
-    await prisma.deal.updateMany({ data: { companyId: null } })
+    await prisma.opportunity.updateMany({ data: { companyId: null } })
     await prisma.contact.updateMany({ data: { companyId: null } })
     await prisma.company.deleteMany({})
     revalidatePath('/companies')
     revalidatePath('/contacts')
     revalidatePath('/dashboard')
-  } else if (target === 'deals') {
-    await prisma.activity.deleteMany({ where: { dealId: { not: null } } })
-    await prisma.deal.deleteMany({})
-    revalidatePath('/deals')
+  } else if (target === 'opportunities') {
+    await prisma.activity.deleteMany({ where: { opportunityId: { not: null } } })
+    await prisma.opportunity.deleteMany({})
+    revalidatePath('/opportunities')
     revalidatePath('/dashboard')
   }
 }
@@ -521,11 +661,27 @@ export async function checkImportConflicts(tasks: ImportTask[]): Promise<ImportC
   const conflicts: ImportConflict[] = []
   for (const task of tasks) {
     if (task.targetId === 'company') {
+      const names = [...new Set(task.mappedData.map((row) => row.name).filter(Boolean))]
+      const domains = [...new Set(task.mappedData.map((row) => row.domain).filter(Boolean))]
+      if (!names.length && !domains.length) continue
+      const existingRows = await prisma.company.findMany({
+        where: {
+          OR: [
+            ...(names.length ? [{ name: { in: names } }] : []),
+            ...(domains.length ? [{ domain: { in: domains } }] : []),
+          ],
+        },
+        select: { id: true, name: true, domain: true, industry: true, size: true, website: true },
+      })
+      const existingByName = new Map(existingRows.map((r) => [r.name, r]))
+      const existingByDomain = new Map(
+        existingRows
+          .filter((r) => !!r.domain)
+          .map((r) => [r.domain as string, r]),
+      )
       for (const row of task.mappedData) {
         if (!row.name) continue
-        const existing = await prisma.company.findFirst({
-          where: { OR: [{ name: row.name }, row.domain ? { domain: row.domain } : { id: 'NONE' }] },
-        })
+        const existing = existingByName.get(row.name) ?? (row.domain ? existingByDomain.get(row.domain) : null)
         if (existing) {
           const diffs: ImportConflict['diffs'] = {}
           for (const key of ['industry', 'size', 'website'] as const) {
@@ -541,9 +697,16 @@ export async function checkImportConflicts(tasks: ImportTask[]): Promise<ImportC
         }
       }
     } else if (task.targetId === 'contact') {
+      const emails = [...new Set(task.mappedData.map((row) => row.email).filter(Boolean))]
+      if (!emails.length) continue
+      const existingRows = await prisma.contact.findMany({
+        where: { email: { in: emails } },
+        select: { id: true, email: true, firstName: true, lastName: true, title: true, phone: true },
+      })
+      const existingByEmail = new Map(existingRows.map((r) => [r.email, r]))
       for (const row of task.mappedData) {
         if (!row.email) continue
-        const existing = await prisma.contact.findUnique({ where: { email: row.email } })
+        const existing = existingByEmail.get(row.email)
         if (existing) {
           const diffs: ImportConflict['diffs'] = {}
           for (const key of ['firstName', 'lastName', 'title', 'phone'] as const) {
@@ -566,105 +729,318 @@ export async function checkImportConflicts(tasks: ImportTask[]): Promise<ImportC
 const COMPANY_STANDARD_KEYS = new Set(['name', 'domain', 'industry', 'size', 'website', '_customFields', '_companyAssociation'])
 const CONTACT_STANDARD_KEYS = new Set(['firstName', 'lastName', 'email', 'phone', 'title', 'linkedin', 'leadScore', 'street', 'city', 'state', 'zip', 'country', '_customFields', '_companyAssociation'])
 
-export async function bulkImportCompanies(rows: Record<string, string>[]): Promise<Record<string, string>> {
-  const companyMap: Record<string, string> = {}
-  for (const row of rows) {
-    if (!row.name) continue
-    let customFields: Record<string, string> = {}
-    if (row._customFields) {
-      try { customFields = JSON.parse(row._customFields) } catch { /* ignore */ }
-    }
-    // Any mapped field not in the standard set goes to customFields
-    for (const [k, v] of Object.entries(row)) {
-      if (!COMPANY_STANDARD_KEYS.has(k) && v) customFields[k] = v
-    }
-    let company = await prisma.company.findFirst({ where: { name: row.name } })
-    if (!company) {
-      company = await prisma.company.create({
-        data: {
-          name: row.name,
-          domain: row.domain || null,
-          industry: row.industry || null,
-          size: row.size || null,
-          website: row.website || null,
-          customFields: JSON.stringify(customFields),
-        },
-      })
-    } else if (Object.keys(customFields).length > 0) {
-      let existing: Record<string, string> = {}
-      try { existing = JSON.parse(company.customFields || '{}') } catch { /* ignore */ }
-      await prisma.company.update({
-        where: { id: company.id },
-        data: { customFields: JSON.stringify({ ...existing, ...customFields }) },
-      })
-    }
-    companyMap[company.name] = company.id
+function parseJsonRecord(json: string | null | undefined): Record<string, string> {
+  try {
+    const parsed = JSON.parse(json || '{}')
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, string>
+      : {}
+  } catch {
+    return {}
   }
-  revalidatePath('/companies')
+}
+
+function customFieldsFromImportRow(
+  row: Record<string, string>,
+  standardKeys: Set<string>,
+): Record<string, string> {
+  const customFields = parseJsonRecord(row._customFields)
+  for (const [k, v] of Object.entries(row)) {
+    if (!standardKeys.has(k) && v) customFields[k] = v
+  }
+  return customFields
+}
+
+async function ensureCustomFieldDefs(objectType: string, customKeys: string[]) {
+  const uniqueKeys = [...new Set(customKeys.filter(Boolean))]
+  if (!uniqueKeys.length) return
+  const existing = await prisma.fieldDefinition.findMany({
+    where: { objectType, key: { in: uniqueKeys }, isBuiltIn: false },
+    select: { key: true },
+  })
+  const existingKeys = new Set(existing.map((f) => f.key))
+  const missing = uniqueKeys.filter((key) => !existingKeys.has(key))
+  if (!missing.length) return
+  const maxOrder = await prisma.fieldDefinition.aggregate({
+    where: { objectType },
+    _max: { order: true },
+  })
+  const startOrder = (maxOrder._max.order ?? 100) + 1
+  await prisma.fieldDefinition.createMany({
+    data: missing.map((key, i) => ({
+      objectType,
+      key,
+      label: key.replace(/[_-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+      fieldType: 'text',
+      isBuiltIn: false,
+      required: false,
+      isPrimary: false,
+      order: startOrder + i,
+      hidden: false,
+    })),
+  })
+}
+
+export async function bulkImportCompanies(rows: Record<string, string>[]): Promise<Record<string, string>> {
+  const preparedRows = rows
+    .filter((row) => !!row.name)
+    .map((row) => ({
+      name: row.name,
+      domain: row.domain || null,
+      industry: row.industry || null,
+      size: row.size || null,
+      website: row.website || null,
+      customFields: customFieldsFromImportRow(row, COMPANY_STANDARD_KEYS),
+    }))
+  if (!preparedRows.length) return {}
+
+  const allCustomKeys = new Set<string>()
+  for (const row of preparedRows) {
+    for (const key of Object.keys(row.customFields)) allCustomKeys.add(key)
+  }
+
+  const names = [...new Set(preparedRows.map((row) => row.name))]
+  const domains = [...new Set(preparedRows.map((row) => row.domain).filter(Boolean))] as string[]
+  const existingRows = await prisma.company.findMany({
+    where: {
+      OR: [
+        ...(names.length ? [{ name: { in: names } }] : []),
+        ...(domains.length ? [{ domain: { in: domains } }] : []),
+      ],
+    },
+    select: { id: true, name: true, domain: true, customFields: true },
+  })
+  const existingByName = new Map(existingRows.map((row) => [row.name, row]))
+  const existingByDomain = new Map(existingRows.filter((row) => !!row.domain).map((row) => [row.domain as string, row]))
+  const mergedCustomById = new Map(existingRows.map((row) => [row.id, parseJsonRecord(row.customFields)]))
+
+  const createByName = new Map<string, {
+    name: string
+    domain: string | null
+    industry: string | null
+    size: string | null
+    website: string | null
+    customFields: Record<string, string>
+  }>()
+  const companyMap: Record<string, string> = {}
+
+  for (const row of preparedRows) {
+    const existing = existingByName.get(row.name) ?? (row.domain ? existingByDomain.get(row.domain) : null)
+    if (existing) {
+      const merged = mergedCustomById.get(existing.id) ?? {}
+      mergedCustomById.set(existing.id, { ...merged, ...row.customFields })
+      companyMap[row.name] = existing.id
+      continue
+    }
+    const pending = createByName.get(row.name)
+    if (pending) {
+      pending.domain = pending.domain || row.domain
+      pending.industry = pending.industry || row.industry
+      pending.size = pending.size || row.size
+      pending.website = pending.website || row.website
+      pending.customFields = { ...pending.customFields, ...row.customFields }
+      continue
+    }
+    createByName.set(row.name, { ...row })
+  }
+
+  const toCreate = [...createByName.values()]
+  if (toCreate.length) {
+    await prisma.company.createMany({
+      data: toCreate.map((row) => ({
+        name: row.name,
+        domain: row.domain,
+        industry: row.industry,
+        size: row.size,
+        website: row.website,
+        customFields: JSON.stringify(row.customFields),
+      })),
+    })
+    const createdRows = await prisma.company.findMany({
+      where: { name: { in: toCreate.map((row) => row.name) } },
+      select: { id: true, name: true },
+    })
+    for (const row of createdRows) {
+      companyMap[row.name] = row.id
+    }
+  }
+
+  const updates: Promise<unknown>[] = []
+  for (const existing of existingRows) {
+    const merged = mergedCustomById.get(existing.id) ?? {}
+    const mergedJson = JSON.stringify(merged)
+    if (mergedJson === (existing.customFields || '{}')) continue
+    updates.push(
+      prisma.company.update({
+        where: { id: existing.id },
+        data: { customFields: mergedJson },
+      }),
+    )
+  }
+  if (updates.length) {
+    await Promise.all(updates)
+  }
+
+  await ensureCustomFieldDefs('company', [...allCustomKeys])
   return companyMap
 }
 
 export async function bulkImportContacts(rows: Record<string, string>[], companyMap: Record<string, string>) {
-  for (const row of rows) {
+  const preparedRows = rows.map((row) => {
     const email = row.email || `unknown_${Math.random().toString(36).slice(2)}@import.csv`
-    const companyId = row._companyAssociation ? companyMap[row._companyAssociation] ?? null : null
-    let customFields: Record<string, string> = {}
-    if (row._customFields) {
-      try { customFields = JSON.parse(row._customFields) } catch { /* ignore */ }
+    return {
+      email,
+      firstName: row.firstName || 'Unknown',
+      lastName: row.lastName || 'Unknown',
+      title: row.title || null,
+      phone: row.phone || null,
+      linkedin: row.linkedin || null,
+      companyId: row._companyAssociation ? companyMap[row._companyAssociation] ?? null : null,
+      customFields: customFieldsFromImportRow(row, CONTACT_STANDARD_KEYS),
+      raw: row,
     }
-    // Any mapped field not in the standard set goes to customFields
-    for (const [k, v] of Object.entries(row)) {
-      if (!CONTACT_STANDARD_KEYS.has(k) && v) customFields[k] = v
+  })
+  if (!preparedRows.length) return
+
+  const allCustomKeys = new Set<string>()
+  for (const row of preparedRows) {
+    for (const key of Object.keys(row.customFields)) allCustomKeys.add(key)
+  }
+
+  const existingRows = await prisma.contact.findMany({
+    where: { email: { in: [...new Set(preparedRows.map((row) => row.email))] } },
+    select: { id: true, email: true, customFields: true },
+  })
+  const existingByEmail = new Map(existingRows.map((row) => [row.email, row]))
+
+  const toCreate: Array<{
+    firstName: string
+    lastName: string
+    email: string
+    title: string | null
+    phone: string | null
+    linkedin: string | null
+    companyId: string | null
+    customFields: string
+  }> = []
+  const updateOps: Promise<unknown>[] = []
+
+  for (const row of preparedRows) {
+    const existing = existingByEmail.get(row.email)
+    if (!existing) {
+      toCreate.push({
+        firstName: row.firstName,
+        lastName: row.lastName,
+        email: row.email,
+        title: row.title,
+        phone: row.phone,
+        linkedin: row.linkedin,
+        companyId: row.companyId,
+        customFields: JSON.stringify(row.customFields),
+      })
+      continue
     }
-    const existing = await prisma.contact.findUnique({ where: { email } })
-    let mergedCustomFields = customFields
-    if (existing && Object.keys(customFields).length > 0) {
-      let prev: Record<string, string> = {}
-      try { prev = JSON.parse(existing.customFields || '{}') } catch { /* ignore */ }
-      mergedCustomFields = { ...prev, ...customFields }
-    }
-    await prisma.contact.upsert({
-      where: { email },
-      update: {
-        firstName: row.firstName || undefined,
-        lastName: row.lastName || undefined,
-        title: row.title || undefined,
-        phone: row.phone || undefined,
-        linkedin: row.linkedin || undefined,
-        companyId: companyId || undefined,
-        ...(Object.keys(mergedCustomFields).length > 0 && { customFields: JSON.stringify(mergedCustomFields) }),
-      },
-      create: {
-        firstName: row.firstName || 'Unknown',
-        lastName: row.lastName || 'Unknown',
-        email,
-        title: row.title || null,
-        phone: row.phone || null,
-        linkedin: row.linkedin || null,
-        companyId,
-        customFields: JSON.stringify(customFields),
-      },
+    const mergedCustom = { ...parseJsonRecord(existing.customFields), ...row.customFields }
+    updateOps.push(
+      prisma.contact.update({
+        where: { email: row.email },
+        data: {
+          firstName: row.raw.firstName || undefined,
+          lastName: row.raw.lastName || undefined,
+          title: row.raw.title || undefined,
+          phone: row.raw.phone || undefined,
+          linkedin: row.raw.linkedin || undefined,
+          companyId: row.companyId || undefined,
+          ...(Object.keys(mergedCustom).length > 0 ? { customFields: JSON.stringify(mergedCustom) } : {}),
+        },
+      }),
+    )
+  }
+
+  if (toCreate.length) {
+    await prisma.contact.createMany({
+      data: toCreate,
+      skipDuplicates: true,
     })
   }
+  if (updateOps.length) {
+    await Promise.all(updateOps)
+  }
+  await ensureCustomFieldDefs('contact', [...allCustomKeys])
+}
+
+export async function bulkImportAll(tasks: ImportTask[]): Promise<{ companies: number; contacts: number }> {
+  const companyTask = tasks.find((t) => t.targetId === 'company')
+  const contactTask = tasks.find((t) => t.targetId === 'contact')
+  let companyMap: Record<string, string> = {}
+
+  if (companyTask?.mappedData.length) {
+    companyMap = await bulkImportCompanies(companyTask.mappedData)
+  }
+  if (contactTask?.mappedData.length) {
+    await bulkImportContacts(contactTask.mappedData, companyMap)
+  }
+
+  revalidatePath('/companies')
   revalidatePath('/contacts')
+  revalidatePath('/dashboard')
+
+  return {
+    companies: companyTask?.mappedData.length ?? 0,
+    contacts: contactTask?.mappedData.length ?? 0,
+  }
+}
+
+import {
+  enrichAllRows,
+  type EnrichTargetId,
+  type EnrichMode,
+  type EnrichRequest,
+  type EnrichResult,
+} from '@/lib/enrichRecords'
+
+export type { EnrichTargetId, EnrichMode, EnrichRequest, EnrichResult }
+
+/** @deprecated Prefer POST /api/import/enrich for large CSV files. */
+export async function enrichRecordsFromCsv(req: EnrichRequest & { revalidate?: boolean }): Promise<EnrichResult> {
+  const result = await enrichAllRows(req)
+  if (req.revalidate !== false) {
+    revalidatePath('/contacts')
+    revalidatePath('/companies')
+    revalidatePath('/opportunities')
+  }
+  return result
 }
 
 // --- Users ---
 
 export async function createUser(formData: FormData) {
+  const password = formData.get('password') as string | null
+  let hashedPassword: string | null = null
+  if (password?.trim()) {
+    const { createHash } = await import('crypto')
+    hashedPassword = createHash('sha256').update(password.trim()).digest('hex')
+  }
   await prisma.user.create({
     data: {
       name: formData.get('name') as string,
       email: formData.get('email') as string,
       role: (formData.get('role') as string) || 'member',
       color: (formData.get('color') as string) || '#6366f1',
+      password: hashedPassword,
     },
   })
   revalidatePath('/users')
 }
 
-export async function updateUser(id: string, data: { name: string; email: string; role: string; color: string }) {
-  await prisma.user.update({ where: { id }, data })
+export async function updateUser(id: string, data: { name: string; email: string; role: string; color: string; password?: string }) {
+  const { password, ...rest } = data
+  const update: Record<string, unknown> = { ...rest }
+  if (password?.trim()) {
+    const { createHash } = await import('crypto')
+    update.password = createHash('sha256').update(password.trim()).digest('hex')
+  }
+  await prisma.user.update({ where: { id }, data: update })
   revalidatePath('/users')
 }
 
@@ -681,11 +1057,11 @@ export async function createTask(data: {
   status?: string
   priority?: string
   dueDate?: string
-  assigneeId?: string
-  contactId?: string
-  companyId?: string
-  dealId?: string
-  segmentId?: string
+  assigneeId?: string | null
+  contactId?: string | null
+  companyId?: string | null
+  opportunityId?: string | null
+  segmentId?: string | null
 }) {
   await prisma.task.create({
     data: {
@@ -694,11 +1070,11 @@ export async function createTask(data: {
       status: data.status || 'todo',
       priority: data.priority || 'medium',
       dueDate: data.dueDate ? new Date(data.dueDate) : null,
-      assigneeId: data.assigneeId || null,
-      contactId: data.contactId || null,
-      companyId: data.companyId || null,
-      dealId: data.dealId || null,
-      segmentId: data.segmentId || null,
+      assigneeId: data.assigneeId ?? null,
+      contactId: data.contactId ?? null,
+      companyId: data.companyId ?? null,
+      opportunityId: data.opportunityId ?? null,
+      segmentId: data.segmentId ?? null,
     },
   })
   if (data.assigneeId) {
@@ -713,6 +1089,7 @@ export async function createTask(data: {
     })
   }
   revalidatePath('/tasks')
+  revalidatePath('/my-work')
 }
 
 export async function updateTask(id: string, data: {
@@ -724,17 +1101,19 @@ export async function updateTask(id: string, data: {
   assigneeId?: string | null
   contactId?: string | null
   companyId?: string | null
-  dealId?: string | null
+  opportunityId?: string | null
   segmentId?: string | null
 }) {
+  const { dueDate, ...rest } = data
   await prisma.task.update({
     where: { id },
     data: {
-      ...data,
-      dueDate: data.dueDate === undefined ? undefined : data.dueDate ? new Date(data.dueDate) : null,
+      ...rest,
+      dueDate: dueDate === undefined ? undefined : dueDate ? new Date(dueDate) : null,
     },
   })
   revalidatePath('/tasks')
+  revalidatePath('/my-work')
 }
 
 export async function updateTaskStatus(id: string, status: string) {
@@ -750,11 +1129,156 @@ export async function updateTaskStatus(id: string, status: string) {
     })
   }
   revalidatePath('/tasks')
+  revalidatePath('/my-work')
+}
+
+/** Apply form field values to the record linked on the task, then mark the task done. */
+export async function submitFormFromTask(
+  taskId: string,
+  formId: string,
+  values: Record<string, string>,
+) {
+  const { parseFormIdFromTask } = await import('@/lib/formTasks')
+  const task = await prisma.task.findUnique({ where: { id: taskId } })
+  if (!task) throw new Error('Task not found')
+  if (parseFormIdFromTask(task) !== formId) throw new Error('Form does not match this task')
+
+  const form = await prisma.form.findUnique({ where: { id: formId } })
+  if (!form) throw new Error('Form not found')
+
+  const { parseFormLayout, fieldValueKey } = await import('@/lib/formLayout')
+  const sections = parseFormLayout(form.layoutJson)
+  const fields = sections.flatMap(s => s.rows.flatMap(r => r.columns.filter(Boolean) as import('@/lib/formLayout').FormField[]))
+
+  const byObject = new Map<string, Record<string, string>>()
+  for (const field of fields) {
+    const raw = values[fieldValueKey(field)]
+    if (raw === undefined || raw === '') continue
+    const bucket = byObject.get(field.objectType) ?? {}
+    bucket[field.fieldKey] = raw
+    byObject.set(field.objectType, bucket)
+  }
+
+  const COMPANY_STD = new Set(['name', 'domain', 'industry', 'size', 'website'])
+  const CONTACT_STD = new Set([
+    'firstName', 'lastName', 'email', 'phone', 'title', 'linkedin',
+    'leadScore', 'street', 'city', 'state', 'zip', 'country', 'enriched',
+  ])
+  const OPPORTUNITY_STD = new Set(['name', 'value', 'stage'])
+  if (byObject.has('deal') && !byObject.has('opportunity')) {
+    byObject.set('opportunity', byObject.get('deal')!)
+  }
+
+  async function applyCustomFields(
+    existingJson: string,
+    incoming: Record<string, string>,
+    stdKeys: Set<string>,
+  ) {
+    let existing: Record<string, string> = {}
+    try { existing = JSON.parse(existingJson || '{}') } catch { /* ignore */ }
+    for (const [k, v] of Object.entries(incoming)) {
+      if (stdKeys.has(k)) continue
+      const customKey = k.startsWith('custom_') ? k.slice(7) : k
+      existing[customKey] = v
+    }
+    return JSON.stringify(existing)
+  }
+
+  if (task.companyId && byObject.has('company')) {
+    const data = byObject.get('company')!
+    const company = await prisma.company.findUnique({ where: { id: task.companyId } })
+    if (company) {
+      await prisma.company.update({
+        where: { id: task.companyId },
+        data: {
+          name: data.name ?? company.name,
+          domain: data.domain ?? company.domain,
+          industry: data.industry ?? company.industry,
+          size: data.size ?? company.size,
+          website: data.website ?? company.website,
+          customFields: await applyCustomFields(company.customFields, data, COMPANY_STD),
+        },
+      })
+    }
+  }
+
+  if (task.contactId && byObject.has('contact')) {
+    const data = byObject.get('contact')!
+    const contact = await prisma.contact.findUnique({ where: { id: task.contactId } })
+    if (contact) {
+      const leadScore = data.leadScore !== undefined ? parseInt(data.leadScore, 10) : contact.leadScore
+      await prisma.contact.update({
+        where: { id: task.contactId },
+        data: {
+          firstName: data.firstName ?? contact.firstName,
+          lastName: data.lastName ?? contact.lastName,
+          email: data.email ?? contact.email,
+          phone: data.phone ?? contact.phone,
+          title: data.title ?? contact.title,
+          linkedin: data.linkedin ?? contact.linkedin,
+          street: data.street ?? contact.street,
+          city: data.city ?? contact.city,
+          state: data.state ?? contact.state,
+          zip: data.zip ?? contact.zip,
+          country: data.country ?? contact.country,
+          leadScore: isNaN(leadScore) ? contact.leadScore : leadScore,
+          enriched: data.enriched === 'true' ? true : data.enriched === 'false' ? false : contact.enriched,
+          customFields: await applyCustomFields(contact.customFields, data, CONTACT_STD),
+        },
+      })
+    }
+  }
+
+  if (task.opportunityId && byObject.has('opportunity')) {
+    const data = byObject.get('opportunity')!
+    const opportunity = await prisma.opportunity.findUnique({ where: { id: task.opportunityId } })
+    if (opportunity) {
+      const value = data.value !== undefined ? parseFloat(data.value) : opportunity.value
+      await prisma.opportunity.update({
+        where: { id: task.opportunityId },
+        data: {
+          name: data.name ?? opportunity.name,
+          stage: data.stage ?? opportunity.stage,
+          value: isNaN(value) ? opportunity.value : value,
+        },
+      })
+    }
+  }
+
+  if (task.contactId) {
+    await prisma.activity.create({
+      data: {
+        type: 'form_submitted',
+        title: `Form submitted: ${form.name}`,
+        body: task.title,
+        contactId: task.contactId,
+      },
+    })
+  }
+
+  await prisma.task.update({
+    where: { id: taskId },
+    data: { status: 'done' },
+  })
+
+  revalidatePath('/tasks')
+  revalidatePath('/my-work')
+  if (task.companyId) revalidatePath(`/companies/${task.companyId}`)
+  if (task.contactId) revalidatePath(`/contacts/${task.contactId}`)
+  revalidatePath('/opportunities')
 }
 
 export async function deleteTask(id: string) {
   await prisma.task.delete({ where: { id } })
   revalidatePath('/tasks')
+  revalidatePath('/my-work')
+}
+
+export async function deleteTasks(ids: string[]) {
+  if (ids.length === 0) return
+  await prisma.task.deleteMany({ where: { id: { in: ids } } })
+  revalidatePath('/tasks')
+  revalidatePath('/my-work')
 }
 
 // --- Segment Workflow Links ---
@@ -771,7 +1295,62 @@ export async function removeSegmentWorkflowLink(id: string) {
   return prisma.segmentWorkflowLink.delete({ where: { id } })
 }
 
-export async function executeSegmentWorkflow(linkId: string) {
+export async function getWorkflowExecutionPreview(linkId: string) {
+  const link = await prisma.segmentWorkflowLink.findUnique({
+    where: { id: linkId },
+    include: { segment: true, sequence: true },
+  })
+  if (!link) throw new Error('Link not found')
+
+  const {
+    resolveSegmentMembers,
+    memberObjectType,
+  } = await import('@/lib/segmentData')
+  const { parseSegmentObjectTypes } = await import('@/lib/segmentObjects')
+  const { parseWorkflowNodes, extractFormNodes, extractTaskNodes } = await import('@/lib/workflowExecution')
+
+  const members = await resolveSegmentMembers(link.segment)
+  const objectTypes = parseSegmentObjectTypes(link.segment)
+  const defaultType = objectTypes[0]
+  const contactCount = members.filter(m => memberObjectType(m, defaultType) === 'contact').length
+
+  const typeCounts = new Map<string, number>()
+  for (const m of members) {
+    const t = memberObjectType(m, defaultType)
+    typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1)
+  }
+  const typeLabel = (t: string, n: number) => {
+    const labels: Record<string, [string, string]> = {
+      contact: ['contact', 'contacts'],
+      company: ['company', 'companies'],
+      opportunity: ['opportunity', 'opportunities'],
+    }
+    const [one, many] = labels[t] ?? [t, `${t}s`]
+    return `${n} ${n === 1 ? one : many}`
+  }
+  const recordSummary = [...typeCounts.entries()].map(([t, n]) => typeLabel(t, n)).join(', ')
+
+  const forms = await prisma.form.findMany({ select: { id: true, name: true } })
+  const formNames = new Map(forms.map(f => [f.id, f.name]))
+  const nodes = parseWorkflowNodes(link.sequence.nodesJson)
+  const formNodes = extractFormNodes(nodes, formNames)
+  const taskNodes = extractTaskNodes(nodes)
+
+  return {
+    segmentName: link.segment.name,
+    workflowName: link.sequence.name,
+    recordCount: members.length,
+    contactCount,
+    recordSummary: recordSummary || '0 records',
+    formNodes,
+    taskNodeCount: taskNodes.length,
+  }
+}
+
+export async function executeSegmentWorkflow(
+  linkId: string,
+  options?: { formMode?: 'per_record' | 'per_segment' },
+) {
   const link = await prisma.segmentWorkflowLink.findUnique({
     where: { id: linkId },
     include: {
@@ -781,54 +1360,112 @@ export async function executeSegmentWorkflow(linkId: string) {
   })
   if (!link) throw new Error('Link not found')
 
-  // Load contacts and apply segment filters
-  const { applyFilters, flattenContact } = await import('@/lib/filters')
-  const contacts = await prisma.contact.findMany({
-    include: {
-      company: { select: { id: true, name: true, domain: true, industry: true, size: true } },
-      deals: { select: { stage: true, value: true } },
-      activities: { select: { type: true } },
-      enrollments: { select: { sequenceId: true } },
-    },
+  const {
+    resolveSegmentMembers,
+    memberObjectType,
+    workflowLinkForMember,
+  } = await import('@/lib/segmentData')
+  const { parseSegmentObjectTypes } = await import('@/lib/segmentObjects')
+  const members = await resolveSegmentMembers(link.segment)
+  const objectTypes = parseSegmentObjectTypes(link.segment)
+  const defaultType = objectTypes[0]
+
+  const { parseWorkflowNodes, extractFormNodes, extractTaskNodes } = await import('@/lib/workflowExecution')
+  const { advanceWorkflowEnrollment, sequenceHasCanvasWorkflow } = await import('@/lib/workflowEngine')
+  const formMode = options?.formMode ?? 'per_record'
+
+  const forms = await prisma.form.findMany({ select: { id: true, name: true } })
+  const formNames = new Map(forms.map(f => [f.id, f.name]))
+  const nodes = parseWorkflowNodes(link.sequence.nodesJson)
+  const taskNodes = extractTaskNodes(nodes)
+  const formNodes = extractFormNodes(nodes, formNames)
+  const hasCanvas = sequenceHasCanvasWorkflow(
+    link.sequence.nodesJson,
+    link.sequence.edgesJson,
+  )
+
+  const contextJson = JSON.stringify({
+    formMode,
+    segmentId: link.segmentId,
+    assignedUserId: link.assignedUserId,
   })
 
-  let filters: import('@/lib/filters').SegmentFilter[] = []
-  try { filters = JSON.parse(link.segment.filtersJson) } catch { filters = [] }
-
-  const flatRecords = contacts.map(flattenContact)
-  const matching = applyFilters(flatRecords, filters)
-  const matchingIds = new Set(matching.map(r => r._id))
-
-  const matchingContacts = contacts.filter(c => matchingIds.has(c.id))
-
-  // Parse workflow nodes to find task nodes
-  let taskNodes: Array<{ title: string; priority: string; due: string }> = []
-  try {
-    const nodes: Array<{ type: string; data: { config?: Record<string, string> } }> = JSON.parse(link.sequence.nodesJson || '[]')
-    taskNodes = nodes
-      .filter(n => n.type === 'task' && n.data?.config)
-      .map(n => ({
-        title: n.data.config!.title || 'Follow up',
-        priority: n.data.config!.priority || 'medium',
-        due: n.data.config!.due || '1',
-      }))
-  } catch { /* */ }
-
-  // Enroll each contact + create tasks
   let enrolled = 0
-  for (const contact of matchingContacts) {
-    // Create enrollment if not already enrolled
-    const existing = await prisma.enrollment.findFirst({
-      where: { contactId: contact.id, sequenceId: link.sequenceId },
-    })
-    if (!existing) {
-      await prisma.enrollment.create({
-        data: { contactId: contact.id, sequenceId: link.sequenceId, currentStep: 0, active: true },
+  let tasksCreated = 0
+  let formsAssigned = 0
+
+  for (const member of members) {
+    const objectType = memberObjectType(member, defaultType)
+    const recordId = member._id
+    const displayName = (member._displayName as string) || recordId
+    const recordLink = workflowLinkForMember(objectType, recordId)
+
+    if (hasCanvas) {
+      let enrollment = await prisma.enrollment.findFirst({
+        where: {
+          sequenceId: link.sequenceId,
+          recordType: objectType,
+          recordId,
+        },
       })
-      enrolled++
+
+      if (enrollment && !enrollment.active) {
+        await prisma.workflowRunLog.deleteMany({ where: { enrollmentId: enrollment.id } })
+        enrollment = await prisma.enrollment.update({
+          where: { id: enrollment.id },
+          data: {
+            active: true,
+            completedAt: null,
+            currentStep: 0,
+            currentNodeId: null,
+            resumeAt: null,
+            contextJson,
+            recordLabel: displayName,
+            ...recordLink,
+          },
+        })
+      }
+
+      if (!enrollment) {
+        enrollment = await prisma.enrollment.create({
+          data: {
+            sequenceId: link.sequenceId,
+            recordType: objectType,
+            recordId,
+            recordLabel: displayName,
+            currentStep: 0,
+            active: true,
+            contextJson,
+            ...recordLink,
+          },
+        })
+        await prisma.workflowRunLog.create({
+          data: {
+            enrollmentId: enrollment.id,
+            stepIndex: 0,
+            nodeType: 'enrolled',
+            nodeLabel: 'Enrolled via Segment',
+            dataJson: JSON.stringify({
+              event: 'Bulk enrolled via segment',
+              segmentName: link.segment.name,
+              objectType,
+              recordLabel: displayName,
+            }),
+            status: 'completed',
+          },
+        })
+        enrolled++
+      }
+
+      if (enrollment.active) {
+        const result = await advanceWorkflowEnrollment(enrollment.id)
+        tasksCreated += result.tasksCreated
+        formsAssigned += result.formsAssigned
+      }
+      continue
     }
 
-    // Create tasks from task nodes
+    // Legacy bulk path (no canvas workflow): create task-node tasks per record.
     for (const tn of taskNodes) {
       const dueDate = new Date()
       dueDate.setDate(dueDate.getDate() + parseInt(tn.due || '1', 10))
@@ -837,29 +1474,94 @@ export async function executeSegmentWorkflow(linkId: string) {
           title: tn.title,
           priority: tn.priority,
           dueDate,
-          assigneeId: link.assignedUserId || null,
-          contactId: contact.id,
+          assigneeId: tn.assigneeId || link.assignedUserId || null,
           segmentId: link.segmentId,
+          ...recordLink,
         },
       })
+      tasksCreated++
+    }
+
+    if (formMode === 'per_record' && formNodes.length > 0) {
+      const dueDate = new Date()
+      dueDate.setDate(dueDate.getDate() + 3)
+      const formLabels = formNodes.map(f => f.label).join(', ')
+      const formLinks = formNodes.map(f => `/forms/${f.formId}`).join('\n')
+      const assigneeId =
+        formNodes.find(f => f.assigneeId)?.assigneeId || link.assignedUserId || null
+      await prisma.task.create({
+        data: {
+          title:
+            formNodes.length === 1
+              ? `Fill form: ${formNodes[0].label}`
+              : `Fill forms: ${formLabels}`,
+          description: [
+            `Complete the assigned form${formNodes.length === 1 ? '' : 's'} for ${displayName} (${objectType}).`,
+            formLinks,
+          ].join('\n'),
+          priority: 'medium',
+          dueDate,
+          assigneeId,
+          segmentId: link.segmentId,
+          ...recordLink,
+        },
+      })
+      formsAssigned++
     }
   }
 
-  // Notify the workflow assignee
+  // One form task for the entire segment (per_segment mode; canvas workflows create it at the form step)
+  if (formMode === 'per_segment' && formNodes.length > 0 && !hasCanvas) {
+    const dueDate = new Date()
+    dueDate.setDate(dueDate.getDate() + 7)
+    const formLabels = formNodes.map(f => f.label).join(', ')
+    const formLinks = formNodes.map(f => `/forms/${f.formId}`).join('\n')
+    const assigneeId =
+      formNodes.find(f => f.assigneeId)?.assigneeId || link.assignedUserId || null
+    await prisma.task.create({
+      data: {
+        title:
+          formNodes.length === 1
+            ? `Fill form: ${formLabels} (${link.segment.name})`
+            : `Fill forms for segment: ${link.segment.name}`,
+        description: [
+          `One shared form assignment for the entire segment (${members.length} records).`,
+          `Forms: ${formLabels}`,
+          formLinks,
+        ].join('\n'),
+        priority: 'medium',
+        dueDate,
+        assigneeId,
+        segmentId: link.segmentId,
+      },
+    })
+    formsAssigned = 1
+  }
+
+  if (hasCanvas) {
+    const { processDueWorkflowEnrollments } = await import('@/lib/workflowEngine')
+    await processDueWorkflowEnrollments()
+  }
+
   if (link.assignedUserId) {
     await prisma.notification.create({
       data: {
         userId: link.assignedUserId,
         type: 'workflow',
-        title: `Segment enrolled ${enrolled} contacts in ${link.sequence.name}`,
-        body: `${matchingContacts.length} matching contacts`,
+        title: `Workflow ran on ${link.segment.name}`,
+        body: `Processed ${members.length} record${members.length !== 1 ? 's' : ''}${enrolled > 0 ? `, ${enrolled} contact${enrolled !== 1 ? 's' : ''} enrolled` : ''}`,
         link: `/segments/${link.segmentId}`,
       },
     })
   }
 
   revalidatePath('/segments')
-  return { enrolled, total: matchingContacts.length }
+  revalidatePath(`/segments/${link.segmentId}`)
+  revalidatePath(`/sequences/${link.sequenceId}`)
+  revalidatePath('/sequences/history')
+  revalidatePath('/tasks')
+  revalidatePath('/my-work')
+  return { enrolled, total: members.length, tasksCreated, formsAssigned }
 }
 
 // --- Segment Assignments ---
@@ -934,51 +1636,25 @@ export async function deleteCustomObjectDef(id: string) {
 
 // --- Field Definitions ---
 
+type FieldDefInput = {
+  id?: string
+  key: string
+  label: string
+  fieldType: string
+  selectOptions: string[]
+  required: boolean
+  isPrimary: boolean
+  order: number
+  isBuiltIn: boolean
+}
+
 export async function saveFieldDefinitions(
   objectType: string | null,
   customObjectDefId: string | null,
-  fields: Array<{
-    id?: string
-    key: string
-    label: string
-    fieldType: string
-    selectOptions: string[]
-    required: boolean
-    isPrimary: boolean
-    order: number
-    isBuiltIn: boolean
-  }>
+  fields: FieldDefInput[],
 ) {
-  // Delete fields not in the new list (non-built-in only)
-  const existingIds = fields.filter(f => f.id).map(f => f.id as string)
-  const where = objectType
-    ? { objectType, id: { notIn: existingIds }, isBuiltIn: false }
-    : { customObjectDefId: customObjectDefId!, id: { notIn: existingIds }, isBuiltIn: false }
-  await prisma.fieldDefinition.deleteMany({ where })
-
-  for (const f of fields) {
-    const payload = {
-      objectType: objectType ?? undefined,
-      customObjectDefId: customObjectDefId ?? undefined,
-      key: f.key,
-      label: f.label,
-      fieldType: f.fieldType,
-      selectOptions: JSON.stringify(f.selectOptions),
-      required: f.required,
-      isPrimary: f.isPrimary,
-      order: f.order,
-      isBuiltIn: f.isBuiltIn,
-    }
-    if (f.id) {
-      await prisma.fieldDefinition.update({ where: { id: f.id }, data: payload })
-    } else {
-      await prisma.fieldDefinition.create({ data: payload })
-    }
-  }
-
-  const path = objectType ? `/setup/objects/${objectType}` : `/setup/objects/${customObjectDefId}`
-  revalidatePath(path)
-  revalidatePath('/setup')
+  const { saveSchemaFields } = await import('@/lib/schemaSave')
+  await saveSchemaFields(objectType, customObjectDefId, fields)
 }
 
 // --- Object Relationships ---
@@ -1000,9 +1676,171 @@ export async function deleteObjectRelationship(id: string) {
   return prisma.objectRelationship.delete({ where: { id } })
 }
 
-export async function updateObjectRelationship(id: string, data: { relType?: string; label?: string }) {
+export async function updateObjectRelationship(
+  id: string,
+  data: {
+    relType?: string
+    label?: string
+    fromObject?: string
+    fromField?: string
+    toObject?: string
+    toField?: string
+  },
+) {
   'use server'
   return prisma.objectRelationship.update({ where: { id }, data })
+}
+
+// --- Webhook integrations ---
+
+export async function getWebhookIntegrations() {
+  'use server'
+  return prisma.webhookIntegration.findMany({ orderBy: { createdAt: 'desc' } })
+}
+
+export async function getWebhookIntegration(id: string) {
+  'use server'
+  return prisma.webhookIntegration.findUnique({ where: { id } })
+}
+
+export async function createWebhookIntegration(name: string) {
+  'use server'
+  return prisma.webhookIntegration.create({
+    data: {
+      name: name.trim() || 'Stripe webhook',
+      provider: 'stripe',
+      targetKind: 'custom',
+      targetSlug: 'vb',
+      eventTypes: JSON.stringify(['payment_intent.succeeded']),
+      fieldMappings: JSON.stringify([]),
+      upsertFieldKey: 'trx_id',
+    },
+  })
+}
+
+export type SaveWebhookIntegrationInput = {
+  name: string
+  enabled: boolean
+  targetKind: 'standard' | 'custom'
+  targetSlug: string
+  eventTypes: string[]
+  fieldMappings: import('@/lib/webhooks/types').WebhookFieldMapping[]
+  upsertFieldKey: string
+  webhookSecret: string
+}
+
+export async function saveWebhookIntegration(id: string, input: SaveWebhookIntegrationInput) {
+  'use server'
+  const updated = await prisma.webhookIntegration.update({
+    where: { id },
+    data: {
+      name: input.name.trim(),
+      enabled: input.enabled,
+      targetKind: input.targetKind,
+      targetSlug: input.targetSlug,
+      eventTypes: JSON.stringify(input.eventTypes),
+      fieldMappings: JSON.stringify(input.fieldMappings),
+      upsertFieldKey: input.upsertFieldKey,
+      webhookSecret: input.webhookSecret,
+    },
+  })
+  return updated
+}
+
+export async function deleteWebhookIntegration(id: string) {
+  'use server'
+  await prisma.webhookIntegration.delete({ where: { id } })
+}
+
+export async function getWebhookTargetOptions() {
+  'use server'
+  const { listWebhookTargetOptions } = await import('@/lib/webhooks/applyIntegration')
+  return listWebhookTargetOptions()
+}
+
+export async function getWebhookFieldOptions(
+  targetKind: 'standard' | 'custom',
+  targetSlug: string,
+) {
+  'use server'
+  const { getTargetFieldOptions } = await import('@/lib/webhooks/applyIntegration')
+  return getTargetFieldOptions(targetKind, targetSlug)
+}
+
+export type AddWebhookTargetFieldInput = {
+  key: string
+  label: string
+  fieldType?: string
+}
+
+export async function addWebhookTargetFields(
+  targetKind: 'standard' | 'custom',
+  targetSlug: string,
+  fields: AddWebhookTargetFieldInput[],
+) {
+  'use server'
+
+  let objectType: string | null = targetKind === 'standard' ? targetSlug : null
+  let customObjectDefId: string | null = null
+  let schemaSlug = targetSlug
+
+  if (targetKind === 'custom') {
+    const def = await prisma.customObjectDef.findFirst({
+      where: { OR: [{ slug: targetSlug }, { id: targetSlug }] },
+    })
+    if (!def) throw new Error('Custom object not found')
+    customObjectDefId = def.id
+    schemaSlug = def.id
+    objectType = null
+  }
+
+  const { loadSchemaFields } = await import('@/lib/objectSchema')
+  const schema = await loadSchemaFields(schemaSlug)
+  const existingKeys = new Set(schema.allFields.map((f) => f.key))
+
+  const slugify = (s: string) =>
+    s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+
+  const toAdd = fields
+    .map((f) => ({
+      key: slugify(f.key),
+      label: f.label.trim() || f.key,
+      fieldType: f.fieldType || 'text',
+    }))
+    .filter((f) => f.key && !existingKeys.has(f.key))
+
+  if (toAdd.length > 0) {
+    const merged = [
+      ...schema.allFields.map((f) => ({
+        id: f.id,
+        key: f.key,
+        label: f.label,
+        fieldType: f.fieldType,
+        selectOptions: f.selectOptions,
+        required: f.required,
+        isPrimary: f.isPrimary,
+        order: f.order,
+        isBuiltIn: f.isBuiltIn,
+      })),
+      ...toAdd.map((f, i) => ({
+        key: f.key,
+        label: f.label,
+        fieldType: f.fieldType,
+        selectOptions: [] as string[],
+        required: false,
+        isPrimary: false,
+        order: schema.allFields.length + i,
+        isBuiltIn: false,
+      })),
+    ]
+    const { saveSchemaFields } = await import('@/lib/schemaSave')
+    await saveSchemaFields(objectType, customObjectDefId, merged)
+  }
+
+  revalidatePath('/setup/webhooks')
+  revalidatePath(`/setup/webhooks/${targetSlug}`)
+  const { getTargetFieldOptions } = await import('@/lib/webhooks/applyIntegration')
+  return getTargetFieldOptions(targetKind, targetSlug)
 }
 
 // --- Custom Object Records ---
@@ -1128,7 +1966,7 @@ export async function sendCampaign(id: string) {
   const contacts = await prisma.contact.findMany({
     include: {
       company: { select: { id: true, name: true, domain: true, industry: true, size: true } },
-      deals: { select: { stage: true, value: true } },
+      opportunities: { select: { stage: true, value: true } },
       activities: { select: { type: true } },
       enrollments: { select: { sequenceId: true } },
     },
@@ -1180,52 +2018,35 @@ export async function sendCampaign(id: string) {
 
 // --- Active Lists (Segments) ---
 
-async function evaluateSegmentIds(
-  objectType: string,
-  filtersJson: string,
-): Promise<string[]> {
-  const { applyFilters, flattenContact, flattenCompany, flattenDeal } = await import('@/lib/filters')
-  let filters: import('@/lib/filters').SegmentFilter[] = []
-  try { filters = JSON.parse(filtersJson) } catch { filters = [] }
+async function evaluateSegmentIdsForSegment(segment: {
+  objectType: string
+  objectTypesJson?: string | null
+  filtersJson: string
+}): Promise<string[]> {
+  let filters: SegmentFilter[] = []
+  try { filters = JSON.parse(segment.filtersJson) } catch { filters = [] }
 
-  let records: import('@/lib/filters').FlatRecord[] = []
-  if (objectType === 'contact') {
-    const contacts = await prisma.contact.findMany({
-      include: {
-        company: { select: { id: true, name: true, domain: true, industry: true, size: true } },
-        deals: { select: { stage: true, value: true } },
-        activities: { select: { type: true } },
-        enrollments: { select: { sequenceId: true } },
-      },
-    })
-    records = contacts.map(flattenContact)
-  } else if (objectType === 'company') {
-    const companies = await prisma.company.findMany({
-      include: {
-        contacts: { select: { id: true } },
-        deals: { select: { stage: true, value: true } },
-        activities: { select: { type: true } },
-      },
-    })
-    records = companies.map(flattenCompany)
-  } else if (objectType === 'deal') {
-    const deals = await prisma.deal.findMany({
-      include: {
-        contact: { select: { firstName: true, lastName: true, email: true, title: true, leadScore: true } },
-        company: { select: { name: true, industry: true } },
-        activities: { select: { type: true } },
-      },
-    })
-    records = deals.map(flattenDeal)
+  const objectTypes = parseObjectTypes(segment)
+  const multiObject = objectTypes.length > 1
+  const defaultType = objectTypes[0]
+  const allIds: string[] = []
+
+  for (const type of objectTypes) {
+    const records = await loadRecordsForType(type)
+    const typeFilters = filters.filter(f => (f.objectType ?? defaultType) === type)
+    const matched = applyFilters(records, typeFilters)
+    allIds.push(
+      ...matched.map(r => memberKey(type, r._id, multiObject)),
+    )
   }
-  return applyFilters(records, filters).map(r => r._id)
+  return allIds
 }
 
 export async function setSegmentListType(segmentId: string, listType: 'dynamic' | 'static') {
   const segment = await prisma.segment.findUnique({ where: { id: segmentId } })
   if (!segment) return
   if (listType === 'static') {
-    const ids = await evaluateSegmentIds(segment.objectType, segment.filtersJson)
+    const ids = await evaluateSegmentIdsForSegment(segment)
     await prisma.segment.update({
       where: { id: segmentId },
       data: {
@@ -1251,7 +2072,7 @@ export async function setSegmentListType(segmentId: string, listType: 'dynamic' 
 export async function refreshStaticSegment(segmentId: string) {
   const segment = await prisma.segment.findUnique({ where: { id: segmentId } })
   if (!segment) return
-  const ids = await evaluateSegmentIds(segment.objectType, segment.filtersJson)
+  const ids = await evaluateSegmentIdsForSegment(segment)
   await prisma.segment.update({
     where: { id: segmentId },
     data: {
@@ -1266,7 +2087,7 @@ export async function refreshStaticSegment(segmentId: string) {
 export async function getSegmentDeltas(segmentId: string): Promise<{ newMatchers: string[]; lostMatchers: string[] }> {
   const segment = await prisma.segment.findUnique({ where: { id: segmentId } })
   if (!segment) return { newMatchers: [], lostMatchers: [] }
-  const current = await evaluateSegmentIds(segment.objectType, segment.filtersJson)
+  const current = await evaluateSegmentIdsForSegment(segment)
   let snapshot: string[] = []
   try { snapshot = JSON.parse(segment.memberIds) } catch { snapshot = [] }
   const currentSet = new Set(current)
@@ -1289,7 +2110,7 @@ export async function ensureDefaultPipeline() {
       order: 0,
     },
   })
-  await prisma.deal.updateMany({
+  await prisma.opportunity.updateMany({
     where: { pipelineId: null },
     data: { pipelineId: pipeline.id },
   })
@@ -1315,35 +2136,35 @@ export async function createPipeline(
       order: (maxOrder._max.order ?? 0) + 1,
     },
   })
-  revalidatePath('/deals')
+  revalidatePath('/opportunities')
   return pipeline
 }
 
 export async function updatePipeline(id: string, data: { name?: string; stages?: string }) {
   await prisma.pipeline.update({ where: { id }, data })
-  revalidatePath('/deals')
+  revalidatePath('/opportunities')
 }
 
 export async function deletePipeline(id: string) {
   const pipeline = await prisma.pipeline.findUnique({
     where: { id },
-    include: { _count: { select: { deals: true } } },
+    include: { _count: { select: { opportunities: true } } },
   })
   if (!pipeline) return { ok: false, error: 'Pipeline not found' }
   if (pipeline.isDefault) return { ok: false, error: 'Cannot delete the default pipeline' }
-  if (pipeline._count.deals > 0) return { ok: false, error: 'Cannot delete a pipeline with deals' }
+  if (pipeline._count.opportunities > 0) return { ok: false, error: 'Cannot delete a pipeline with opportunities' }
   await prisma.pipeline.delete({ where: { id } })
-  revalidatePath('/deals')
+  revalidatePath('/opportunities')
   return { ok: true }
 }
 
 export async function setDefaultPipeline(id: string) {
   await prisma.pipeline.updateMany({ data: { isDefault: false } })
   await prisma.pipeline.update({ where: { id }, data: { isDefault: true } })
-  revalidatePath('/deals')
+  revalidatePath('/opportunities')
 }
 
-export async function moveDealToPipeline(dealId: string, pipelineId: string, stageKey: string) {
+export async function moveOpportunityToPipeline(opportunityId: string, pipelineId: string, stageKey: string) {
   const pipeline = await prisma.pipeline.findUnique({ where: { id: pipelineId } })
   if (!pipeline) return
   let stages: Array<{ key: string; label: string; isClosedWon?: boolean; isClosedLost?: boolean }> = []
@@ -1351,11 +2172,11 @@ export async function moveDealToPipeline(dealId: string, pipelineId: string, sta
   const stage = stages.find(s => s.key === stageKey)
   if (!stage) return
   const closedAt = stage.isClosedWon || stage.isClosedLost ? new Date() : null
-  await prisma.deal.update({
-    where: { id: dealId },
+  await prisma.opportunity.update({
+    where: { id: opportunityId },
     data: { pipelineId, stage: stage.label, closedAt },
   })
-  revalidatePath('/deals')
+  revalidatePath('/opportunities')
 }
 
 // --- Notifications ---
@@ -1400,4 +2221,29 @@ export async function markAllNotificationsRead(userId: string) {
 
 export async function deleteNotification(id: string) {
   await prisma.notification.delete({ where: { id } })
+}
+
+// --- Reports ---
+
+export async function getReports() {
+  return prisma.report.findMany({ orderBy: { updatedAt: 'desc' } })
+}
+
+export async function createReport(name: string, description?: string) {
+  const report = await prisma.report.create({
+    data: { name, description: description || null },
+  })
+  revalidatePath('/reports')
+  return report
+}
+
+export async function saveReport(id: string, data: { name?: string; description?: string; configJson?: string }) {
+  await prisma.report.update({ where: { id }, data })
+  revalidatePath('/reports')
+  revalidatePath(`/reports/${id}`)
+}
+
+export async function deleteReport(id: string) {
+  await prisma.report.delete({ where: { id } })
+  revalidatePath('/reports')
 }

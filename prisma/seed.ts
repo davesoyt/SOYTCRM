@@ -82,8 +82,8 @@ async function main() {
     },
   })
 
-  // Deals
-  const deal1 = await prisma.deal.create({
+  // Opportunities
+  const opp1 = await prisma.opportunity.create({
     data: {
       name: 'Acme Enterprise License',
       value: 120000,
@@ -92,7 +92,7 @@ async function main() {
       companyId: acme.id,
     },
   })
-  const deal2 = await prisma.deal.create({
+  const opp2 = await prisma.opportunity.create({
     data: {
       name: 'TechWave Platform Integration',
       value: 45000,
@@ -101,7 +101,7 @@ async function main() {
       companyId: techwave.id,
     },
   })
-  const deal3 = await prisma.deal.create({
+  const opp3 = await prisma.opportunity.create({
     data: {
       name: 'Greenfield Portfolio Tool',
       value: 85000,
@@ -111,7 +111,7 @@ async function main() {
       closedAt: new Date(Date.now() - 14 * 86400000),
     },
   })
-  const deal4 = await prisma.deal.create({
+  const opp4 = await prisma.opportunity.create({
     data: {
       name: 'Acme IT Upgrade',
       value: 28000,
@@ -120,7 +120,7 @@ async function main() {
       companyId: acme.id,
     },
   })
-  await prisma.deal.create({
+  await prisma.opportunity.create({
     data: {
       name: 'TechWave Mobile App',
       value: 18000,
@@ -137,17 +137,17 @@ async function main() {
     data: [
       { type: 'note', title: 'Contact created', contactId: alice.id, createdAt: new Date(now - 25 * 86400000) },
       { type: 'email', title: 'Sent intro email', body: 'Hi Alice, following up on our call...', contactId: alice.id, createdAt: new Date(now - 20 * 86400000) },
-      { type: 'call', title: '30-min discovery call', body: 'Discussed pain points around procurement workflows.', contactId: alice.id, dealId: deal1.id, createdAt: new Date(now - 15 * 86400000) },
-      { type: 'email', title: 'Sent proposal', body: 'Attached the formal proposal for the enterprise license.', contactId: alice.id, dealId: deal1.id, createdAt: new Date(now - 5 * 86400000) },
-      { type: 'stage_change', title: 'Deal moved to Proposal', contactId: alice.id, dealId: deal1.id, createdAt: new Date(now - 5 * 86400000) },
+      { type: 'call', title: '30-min discovery call', body: 'Discussed pain points around procurement workflows.', contactId: alice.id, opportunityId: opp1.id, createdAt: new Date(now - 15 * 86400000) },
+      { type: 'email', title: 'Sent proposal', body: 'Attached the formal proposal for the enterprise license.', contactId: alice.id, opportunityId: opp1.id, createdAt: new Date(now - 5 * 86400000) },
+      { type: 'stage_change', title: 'Opportunity moved to Proposal', contactId: alice.id, opportunityId: opp1.id, createdAt: new Date(now - 5 * 86400000) },
       { type: 'note', title: 'Contact created', contactId: bob.id, createdAt: new Date(now - 18 * 86400000) },
       { type: 'email', title: 'Intro email sent', contactId: bob.id, createdAt: new Date(now - 14 * 86400000) },
-      { type: 'call', title: 'Technical requirements call', body: 'Bob needs API access and SSO.', contactId: bob.id, dealId: deal2.id, createdAt: new Date(now - 7 * 86400000) },
+      { type: 'call', title: 'Technical requirements call', body: 'Bob needs API access and SSO.', contactId: bob.id, opportunityId: opp2.id, createdAt: new Date(now - 7 * 86400000) },
       { type: 'note', title: 'Contact created', contactId: carol.id, createdAt: new Date(now - 45 * 86400000) },
       { type: 'enrichment', title: 'Contact enriched by AI', body: 'Carol manages a $300M fund focused on B2B SaaS.', contactId: carol.id, createdAt: new Date(now - 44 * 86400000) },
       { type: 'call', title: 'Partnership discussion', contactId: carol.id, createdAt: new Date(now - 40 * 86400000) },
-      { type: 'deal_created', title: 'Deal "Greenfield Portfolio Tool" created', contactId: carol.id, dealId: deal3.id, createdAt: new Date(now - 35 * 86400000) },
-      { type: 'stage_change', title: 'Deal moved to Closed Won', contactId: carol.id, dealId: deal3.id, createdAt: new Date(now - 14 * 86400000) },
+      { type: 'opportunity_created', title: 'Opportunity "Greenfield Portfolio Tool" created', contactId: carol.id, opportunityId: opp3.id, createdAt: new Date(now - 35 * 86400000) },
+      { type: 'stage_change', title: 'Opportunity moved to Closed Won', contactId: carol.id, opportunityId: opp3.id, createdAt: new Date(now - 14 * 86400000) },
       { type: 'note', title: 'Contact created', contactId: dave.id, createdAt: new Date(now - 10 * 86400000) },
       { type: 'email', title: 'Sent brochure', contactId: dave.id, createdAt: new Date(now - 8 * 86400000) },
     ],

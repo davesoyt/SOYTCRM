@@ -2,9 +2,13 @@
 
 import { useActionState } from 'react'
 import { enrollContact } from '@/app/actions'
-import type { Sequence } from '../../../generated/prisma/client'
-
-export default function EnrollForm({ contactId, sequences }: { contactId: string; sequences: Sequence[] }) {
+export default function EnrollForm({
+  contactId,
+  sequences,
+}: {
+  contactId: string
+  sequences: { id: string; name: string }[]
+}) {
   const [, action, pending] = useActionState(async (_: unknown, formData: FormData) => {
     await enrollContact(formData)
     return null

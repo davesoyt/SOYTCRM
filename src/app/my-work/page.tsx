@@ -13,13 +13,13 @@ export default async function MyWorkPage() {
         assignee: { select: { id: true, name: true, color: true } },
         contact:  { select: { id: true, firstName: true, lastName: true } },
         company:  { select: { id: true, name: true } },
-        deal:     { select: { id: true, name: true } },
+        opportunity:     { select: { id: true, name: true } },
       },
       orderBy: [{ priority: 'desc' }, { dueDate: 'asc' }],
     }),
 
     prisma.enrollment.findMany({
-      where: { active: true },
+      where: { active: true, contactId: { not: null } },
       include: {
         contact:  { select: { id: true, firstName: true, lastName: true, email: true } },
         sequence: { select: { id: true, name: true, nodesJson: true } },
@@ -38,13 +38,15 @@ export default async function MyWorkPage() {
     updatedAt: t.updatedAt.toISOString(),
   }))
 
-  const serializedEnrollments = enrollments.map(e => ({
-    id:         e.id,
-    startedAt:  e.startedAt.toISOString(),
-    currentStep: e.currentStep,
-    contact:    e.contact,
-    sequence:   e.sequence,
-  }))
+  const serializedEnrollments = enrollments
+    .filter(e => e.contact != null)
+    .map(e => ({
+      id:         e.id,
+      startedAt:  e.startedAt.toISOString(),
+      currentStep: e.currentStep,
+      contact:    e.contact!,
+      sequence:   e.sequence,
+    }))
 
   return (
     <MyWorkDashboard

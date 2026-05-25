@@ -27,7 +27,7 @@ function iconFor(type: string) {
   switch (type) {
     case 'task': return CheckSquare
     case 'workflow': return GitBranch
-    case 'deal': return TrendingUp
+    case 'opportunity': return TrendingUp
     case 'mention': return AtSign
     case 'form': return Wrench
     default: return Bell

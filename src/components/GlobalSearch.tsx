@@ -45,7 +45,7 @@ export default function GlobalSearch() {
     router.push(href)
   }
 
-  const total = results ? results.contacts.length + results.companies.length + results.deals.length : 0
+  const total = results ? results.contacts.length + results.companies.length + results.opportunities.length : 0
 
   return (
     <>
@@ -70,7 +70,7 @@ export default function GlobalSearch() {
                 ref={inputRef}
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                placeholder="Search contacts, companies, deals…"
+                placeholder="Search contacts, companies, opportunities…"
                 className="flex-1 text-sm outline-none placeholder:text-zinc-400"
               />
               {query && (
@@ -125,13 +125,13 @@ export default function GlobalSearch() {
                     ))}
                   </section>
                 )}
-                {results.deals.length > 0 && (
+                {results.opportunities.length > 0 && (
                   <section>
                     <p className="px-4 pt-3 pb-1 text-xs font-semibold text-zinc-400 uppercase tracking-wide flex items-center gap-1.5">
-                      <TrendingUp className="w-3 h-3" /> Deals
+                      <TrendingUp className="w-3 h-3" /> Opportunities
                     </p>
-                    {results.deals.map(d => (
-                      <button key={d.id} onClick={() => go('/deals')} className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-50 text-left">
+                    {results.opportunities.map(d => (
+                      <button key={d.id} onClick={() => go('/opportunities')} className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-50 text-left">
                         <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-xs font-semibold text-green-600 shrink-0">
                           $
                         </div>
@@ -150,7 +150,7 @@ export default function GlobalSearch() {
             )}
 
             {!query && (
-              <p className="px-4 py-8 text-center text-sm text-zinc-400">Search contacts, companies, and deals</p>
+              <p className="px-4 py-8 text-center text-sm text-zinc-400">Search contacts, companies, and opportunities</p>
             )}
           </div>
         </div>

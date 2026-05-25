@@ -10,10 +10,10 @@ import { scoreLabel } from '@/lib/scoring'
 import { updateCompany } from '@/app/actions'
 
 const FIELD_DEFS = [
-  { key: 'stats', label: 'Stats (contacts / deals / value)' },
+  { key: 'stats', label: 'Stats (contacts / opportunities / value)' },
   { key: 'headerMeta', label: 'Header info (industry / size / domain)' },
   { key: 'contacts', label: 'Contacts list' },
-  { key: 'deals', label: 'Deals list' },
+  { key: 'deals', label: 'Opportunities list' },
   { key: 'timeline', label: 'Activity Timeline' },
 ]
 
@@ -29,11 +29,11 @@ type Props = {
     website: string | null
     customFields: string
     contacts: { id: string; firstName: string; lastName: string; leadScore: number }[]
-    deals: { id: string; name: string; stage: string; value: number }[]
-    activities: { id: string; type: string; title: string; body: string | null; createdAt: Date; dealId?: string | null }[]
+    opportunities: { id: string; name: string; stage: string; value: number }[]
+    activities: { id: string; type: string; title: string; body: string | null; createdAt: Date; opportunityId?: string | null }[]
     tasks: { id: string; title: string; status: string; dueDate: Date | null; createdAt: Date }[]
   }
-  totalDealValue: number
+  totalOpportunityValue: number
 }
 
 function FieldRow({ label, value }: { label: string; value: string | null }) {
@@ -60,7 +60,7 @@ function EditInput({
   )
 }
 
-export default function CompanyView({ company, totalDealValue }: Props) {
+export default function CompanyView({ company, totalOpportunityValue }: Props) {
   const { fields, toggle, reset, loaded } = useFieldVisibility(`company:${company.id}`, DEFAULTS)
   const [editing, setEditing] = useState(false)
   const [isPending, startTransition] = useTransition()
@@ -208,8 +208,8 @@ export default function CompanyView({ company, totalDealValue }: Props) {
         <div className="grid grid-cols-3 gap-4 mb-8">
           {[
             { label: 'Contacts', value: company.contacts.length },
-            { label: 'Deals', value: company.deals.length },
-            { label: 'Pipeline Value', value: `$${totalDealValue.toLocaleString()}` },
+            { label: 'Opportunities', value: company.opportunities.length },
+            { label: 'Pipeline Value', value: `$${totalOpportunityValue.toLocaleString()}` },
           ].map(({ label, value }) => (
             <div key={label} className="bg-white rounded-xl border border-zinc-200 p-5">
               <p className="text-xs text-zinc-500 uppercase tracking-wide">{label}</p>
@@ -241,9 +241,9 @@ export default function CompanyView({ company, totalDealValue }: Props) {
 
           {fields.deals && (
             <div className="bg-white rounded-xl border border-zinc-200 p-5">
-              <h2 className="font-semibold mb-4">Deals</h2>
+              <h2 className="font-semibold mb-4">Opportunities</h2>
               <ul className="space-y-2">
-                {company.deals.map(d => (
+                {company.opportunities.map(d => (
                   <li key={d.id} className="text-sm flex justify-between items-center">
                     <span className="font-medium">{d.name}</span>
                     <div className="flex gap-2 text-xs text-zinc-500">
@@ -252,7 +252,7 @@ export default function CompanyView({ company, totalDealValue }: Props) {
                     </div>
                   </li>
                 ))}
-                {!company.deals.length && <li className="text-zinc-400 text-sm">No deals.</li>}
+                {!company.opportunities.length && <li className="text-zinc-400 text-sm">No opportunities.</li>}
               </ul>
             </div>
           )}
@@ -268,7 +268,7 @@ export default function CompanyView({ company, totalDealValue }: Props) {
                 title: a.title,
                 body: a.body,
                 createdAt: a.createdAt.toISOString(),
-                dealId: a.dealId ?? null,
+                opportunityId: a.opportunityId ?? null,
               }))}
               tasks={company.tasks.map(t => ({
                 id: t.id,

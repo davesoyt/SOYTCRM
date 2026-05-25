@@ -3,12 +3,18 @@ import { prisma } from '@/lib/prisma'
 import { Plus } from 'lucide-react'
 import ContactsList from './ContactsList'
 import DeleteAllButton from '@/components/DeleteAllButton'
+import { loadSchemaFields } from '@/lib/objectSchema'
+
+export const dynamic = 'force-dynamic'
 
 export default async function ContactsPage() {
-  const contacts = await prisma.contact.findMany({
-    include: { company: { select: { id: true, name: true } } },
-    orderBy: { leadScore: 'desc' },
-  })
+  const [contacts, schema] = await Promise.all([
+    prisma.contact.findMany({
+      include: { company: { select: { id: true, name: true } } },
+      orderBy: { leadScore: 'desc' },
+    }),
+    loadSchemaFields('contact'),
+  ])
 
   return (
     <div className="p-8">
@@ -25,7 +31,7 @@ export default async function ContactsPage() {
           </Link>
         </div>
       </div>
-      <ContactsList contacts={contacts} />
+      <ContactsList contacts={contacts} schemaFields={schema.allFields} />
     </div>
   )
 }

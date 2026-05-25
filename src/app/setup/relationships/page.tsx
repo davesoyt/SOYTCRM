@@ -24,36 +24,20 @@ const STANDARD_BUILT_INS: Record<string, { label: string; fields: { key: string;
       { key: 'size',     label: 'Employee Size', fieldType: 'text' },
     ],
   },
-  deal: {
-    label: 'Deal',
+  opportunity: {
+    label: 'Opportunity',
     fields: [
-      { key: 'name',  label: 'Deal Name', fieldType: 'text' },
+      { key: 'name',  label: 'Opportunity Name', fieldType: 'text' },
       { key: 'value', label: 'Value ($)', fieldType: 'number' },
       { key: 'stage', label: 'Stage',     fieldType: 'select' },
     ],
   },
 }
 
-// Scan actual records for custom field keys not yet in FieldDefinition
-async function scanRecordCustomKeys(slug: string): Promise<string[]> {
-  const keys = new Set<string>()
-  const parse = (json: string) => {
-    try { Object.keys(JSON.parse(json || '{}')).forEach(k => keys.add(k)) } catch { /* */ }
-  }
-  if (slug === 'contact') {
-    const rows = await prisma.contact.findMany({ select: { customFields: true } })
-    rows.forEach(r => parse(r.customFields))
-  } else if (slug === 'company') {
-    const rows = await prisma.company.findMany({ select: { customFields: true } })
-    rows.forEach(r => parse(r.customFields))
-  }
-  return [...keys]
-}
-
 export default async function RelationshipsPage() {
   const [fieldDefs, customObjectDefs, relationships] = await Promise.all([
-    prisma.fieldDefinition.findMany({ orderBy: { order: 'asc' } }),
-    prisma.customObjectDef.findMany({ include: { fields: { orderBy: { order: 'asc' } } } }),
+    prisma.fieldDefinition.findMany({ where: { hidden: false }, orderBy: { order: 'asc' } }),
+    prisma.customObjectDef.findMany({ include: { fields: { where: { hidden: false }, orderBy: { order: 'asc' } } } }),
     prisma.objectRelationship.findMany({ orderBy: { createdAt: 'asc' } }),
   ])
 
@@ -78,24 +62,10 @@ export default async function RelationshipsPage() {
       .filter(f => !f.isBuiltIn)
       .map(f => ({ key: f.key, label: f.label, fieldType: f.fieldType }))
 
-    // Custom fields found in actual records but not yet in FieldDefinition
-    const recordKeys = await scanRecordCustomKeys(slug)
-    const definedKeys = new Set([
-      ...meta.fields.map(f => f.key),
-      ...definedCustomFields.map(f => f.key),
-    ])
-    const orphanFields = recordKeys
-      .filter(k => !definedKeys.has(k))
-      .map(k => ({
-        key: k,
-        label: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-        fieldType: 'text',
-      }))
-
     objects.push({
       id: slug,
       label: meta.label,
-      fields: [...builtInFields, ...definedCustomFields, ...orphanFields],
+      fields: [...builtInFields, ...definedCustomFields],
     })
   }
 

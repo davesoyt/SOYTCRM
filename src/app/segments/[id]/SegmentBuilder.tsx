@@ -3,16 +3,22 @@
 import { useState, useMemo, useTransition, useCallback, useEffect } from 'react'
 import Link from 'next/link'
 import {
-  Plus, Trash2, Save, MapPin, Loader2, ChevronRight,
-  Users, Building2, TrendingUp, ArrowLeft, UserCircle, X, Play,
-  Zap, Lock, RefreshCw,
+  Plus, Trash2, Save, MapPin, Loader2, Users, ArrowLeft, UserCircle, X, Play,
+  Zap, Lock, RefreshCw, ChevronRight,
 } from 'lucide-react'
 import { nanoid } from 'nanoid'
 import {
-  OP_LABELS, applyFilters,
-  type ObjectType, type FlatRecord, type SegmentFilter, type FilterOperator, type FieldMeta,
+  OP_LABELS,
+  applyFiltersForObjectTypes,
+  memberKey,
+  type FlatRecord,
+  type SegmentFilter,
+  type FilterOperator,
+  type FieldMeta,
 } from '@/lib/filters'
-import { saveSegmentFilters, deleteSegment, geocodeAddress, assignSegmentToUser, removeSegmentAssignment, assignSegmentToWorkflow, removeSegmentWorkflowLink, executeSegmentWorkflow, setSegmentListType, refreshStaticSegment } from '@/app/actions'
+import { isStandardObjectType, resolveIcon, type ObjectTypeMeta } from '@/lib/segmentObjects'
+import { saveSegmentFilters, deleteSegment, geocodeAddress, assignSegmentToUser, removeSegmentAssignment, assignSegmentToWorkflow, removeSegmentWorkflowLink, setSegmentListType, refreshStaticSegment } from '@/app/actions'
+import ExecuteWorkflowModal from '@/components/ExecuteWorkflowModal'
 
 type Assignment = { id: string; userId: string; user: { id: string; name: string; color: string } }
 
@@ -29,21 +35,15 @@ type Props = {
     memberIds: string
     lastEvaluatedAt: string | null
   }
-  objectType: ObjectType
-  records: FlatRecord[]
+  objectTypes: string[]
+  recordsByType: Record<string, FlatRecord[]>
+  fieldsByType: Record<string, FieldMeta[]>
+  objectTypeMeta: Record<string, ObjectTypeMeta>
   sequences: { id: string; name: string }[]
-  baseFields: FieldMeta[]   // built-in fields with live labels from DB
-  extraFields: FieldMeta[]  // custom fields
   users: { id: string; name: string; color: string }[]
   assignments: Assignment[]
   workflowLinks: WorkflowLink[]
   allSequences: { id: string; name: string }[]
-}
-
-const OBJECT_CONFIG: Record<ObjectType, { label: string; Icon: React.ElementType; color: string; bg: string }> = {
-  contact: { label: 'Contacts', Icon: Users,       color: 'text-violet-600', bg: 'bg-violet-100' },
-  company: { label: 'Companies', Icon: Building2,  color: 'text-blue-600',   bg: 'bg-blue-100'   },
-  deal:    { label: 'Deals',     Icon: TrendingUp,  color: 'text-emerald-600', bg: 'bg-emerald-100' },
 }
 
 // ---- GeoFilterRow ----
@@ -116,21 +116,49 @@ function GeoFilterRow({ filter, onUpdate }: { filter: SegmentFilter; onUpdate: (
 
 // ---- FilterRow ----
 function FilterRow({
-  filter, fields, groups, sequences, onUpdate, onRemove,
+  filter, objectTypes, fieldsByType, objectTypeMeta, sequences, onUpdate, onRemove,
 }: {
   filter: SegmentFilter
-  fields: FieldMeta[]
-  groups: string[]
+  objectTypes: string[]
+  fieldsByType: Record<string, FieldMeta[]>
+  objectTypeMeta: Record<string, ObjectTypeMeta>
   sequences: { id: string; name: string }[]
   onUpdate: (patch: Partial<SegmentFilter>) => void
   onRemove: () => void
 }) {
+  const filterType = filter.objectType ?? objectTypes[0]
+  const fields = fieldsByType[filterType] ?? []
+  const groups = [...new Set(fields.map(f => f.group))]
   const meta = fields.find(f => f.key === filter.field)
   const noValueOps: FilterOperator[] = ['is_set', 'is_not_set']
   const hideValue = noValueOps.includes(filter.operator)
 
   return (
-    <div className="flex items-start gap-2 p-3 bg-white rounded-xl border border-zinc-200 group">
+    <div className="flex items-start gap-2 p-3 bg-white rounded-xl border border-zinc-200 group flex-wrap">
+      {objectTypes.length > 1 && (
+        <select
+          value={filterType}
+          onChange={e => {
+            const newType = e.target.value
+            const newFields = fieldsByType[newType] ?? []
+            const first = newFields[0]
+            onUpdate({
+              objectType: newType,
+              field: first?.key ?? '',
+              operator: first?.operators[0] ?? 'contains',
+              value: '',
+              geoLat: undefined,
+              geoLng: undefined,
+              geoLabel: undefined,
+            })
+          }}
+          className="rounded-lg border border-violet-300 px-2 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-violet-500 bg-violet-50 text-violet-800 shrink-0"
+        >
+          {objectTypes.map(t => (
+            <option key={t} value={t}>{objectTypeMeta[t]?.label ?? t}</option>
+          ))}
+        </select>
+      )}
       <select
         value={filter.field}
         onChange={e => {
@@ -218,16 +246,28 @@ function FilterRow({
 
 // ---- RecordPreviewRow ----
 function RecordPreviewRow({
-  record, objectType, checked, onToggle,
+  record, objectTypeMeta, checked, onToggle,
 }: {
-  record: FlatRecord; objectType: ObjectType; checked: boolean; onToggle: () => void
+  record: FlatRecord
+  objectTypeMeta: Record<string, ObjectTypeMeta>
+  checked: boolean
+  onToggle: () => void
 }) {
-  const cfg = OBJECT_CONFIG[objectType]
+  const objectType = record._objectType ?? 'contact'
+  const cfg = objectTypeMeta[objectType] ?? {
+    label: objectType,
+    Icon: Users,
+    color: 'text-zinc-600',
+    bg: 'bg-zinc-100',
+    description: '',
+  }
 
-  let meta = ''
-  if (objectType === 'contact') meta = String(record.leadScore ?? 0) + ' score'
-  else if (objectType === 'company') meta = String(record.contactCount ?? 0) + ' contacts'
-  else if (objectType === 'deal') meta = '$' + Number(record.value ?? 0).toLocaleString()
+  let meta = record._subtext as string
+  if (isStandardObjectType(objectType)) {
+    if (objectType === 'contact') meta = String(record.leadScore ?? 0) + ' score'
+    else if (objectType === 'company') meta = String(record.contactCount ?? 0) + ' contacts'
+    else if (objectType === 'opportunity') meta = '$' + Number(record.value ?? 0).toLocaleString()
+  }
 
   return (
     <div className={`flex items-center gap-2 px-4 py-3 hover:bg-white transition-colors group ${checked ? 'bg-violet-50' : ''}`}>
@@ -348,8 +388,8 @@ function WorkflowAssignPanel({
   const [selectedSeqId, setSelectedSeqId] = useState('')
   const [selectedUserId, setSelectedUserId] = useState('')
   const [isPending, startTransition] = useTransition()
-  const [runResult, setRunResult] = useState<{ enrolled: number; total: number } | null>(null)
-  const [runningId, setRunningId] = useState<string | null>(null)
+  const [executeLinkId, setExecuteLinkId] = useState<string | null>(null)
+  const [lastRunByLink, setLastRunByLink] = useState<Record<string, string>>({})
 
   const unlinkedSeqs = sequences.filter(s => !links.some(l => l.sequenceId === s.id))
 
@@ -361,6 +401,7 @@ function WorkflowAssignPanel({
       setLinks(prev => [...prev, { id: link.id, sequenceId: seq.id, assignedUserId: selectedUserId || null, sequence: seq }])
       setSelectedSeqId('')
       setSelectedUserId('')
+      setExecuteLinkId(link.id)
     })
   }
 
@@ -371,14 +412,8 @@ function WorkflowAssignPanel({
     })
   }
 
-  function run(linkId: string) {
-    setRunningId(linkId)
-    setRunResult(null)
-    startTransition(async () => {
-      const result = await executeSegmentWorkflow(linkId)
-      setRunResult(result)
-      setRunningId(null)
-    })
+  function openRunModal(linkId: string) {
+    setExecuteLinkId(linkId)
   }
 
   return (
@@ -401,16 +436,15 @@ function WorkflowAssignPanel({
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
-            {runResult && runningId === null && (
-              <p className="text-xs text-green-600 mb-2">&#10003; Enrolled {runResult.enrolled} of {runResult.total} contacts</p>
+            {lastRunByLink[link.id] && (
+              <p className="text-xs text-green-600 mb-2">{lastRunByLink[link.id]}</p>
             )}
             <button
-              onClick={() => run(link.id)}
-              disabled={isPending && runningId === link.id}
-              className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
+              onClick={() => openRunModal(link.id)}
+              className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 transition-colors"
             >
               <Play className="w-3 h-3" />
-              {isPending && runningId === link.id ? 'Running…' : 'Run — Enroll All Matching'}
+              Run workflow
             </button>
           </div>
         )
@@ -442,22 +476,49 @@ function WorkflowAssignPanel({
             disabled={!selectedSeqId || isPending}
             className="w-full rounded-lg border border-violet-300 bg-violet-50 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 transition-colors"
           >
-            + Link Workflow
+            Assign workflow
           </button>
         </div>
       )}
       {unlinkedSeqs.length === 0 && links.length === 0 && (
         <p className="text-xs text-zinc-300 italic">No workflows available</p>
       )}
+
+      <ExecuteWorkflowModal
+        open={executeLinkId !== null}
+        onClose={() => setExecuteLinkId(null)}
+        linkId={executeLinkId}
+        title="Configure workflow"
+        onExecuted={(res, linkId) => {
+          setLastRunByLink(prev => ({
+            ...prev,
+            [linkId]: `✓ Processed ${res.total} record${res.total !== 1 ? 's' : ''}${res.enrolled > 0 ? ` (${res.enrolled} enrolled)` : ''}`,
+          }))
+        }}
+      />
     </div>
   )
 }
 
 // ---- Main SegmentBuilder ----
-export default function SegmentBuilder({ segment, objectType, records, sequences, baseFields, extraFields, users, assignments, workflowLinks, allSequences }: Props) {
-  const fields = [...baseFields, ...extraFields]
-  const groups = [...new Set(fields.map(f => f.group))]
-  const cfg = OBJECT_CONFIG[objectType]
+export default function SegmentBuilder({
+  segment,
+  objectTypes,
+  recordsByType,
+  fieldsByType,
+  objectTypeMeta,
+  sequences,
+  users,
+  assignments,
+  workflowLinks,
+  allSequences,
+}: Props) {
+  const multiObject = objectTypes.length > 1
+  const primaryType = objectTypes[0]
+  const allRecords = useMemo(
+    () => objectTypes.flatMap(t => recordsByType[t] ?? []),
+    [objectTypes, recordsByType],
+  )
 
   const [name, setName] = useState(segment.name)
   const [description, setDescription] = useState(segment.description ?? '')
@@ -473,9 +534,19 @@ export default function SegmentBuilder({ segment, objectType, records, sequences
     try { return new Set<string>(JSON.parse(segment.memberIds)) } catch { return new Set<string>() }
   }, [segment.memberIds])
   const matching = useMemo(() => {
-    if (listType === 'static') return records.filter(r => memberIdSet.has(r._id))
-    return applyFilters(records, filters)
-  }, [records, filters, listType, memberIdSet])
+    if (listType === 'static') {
+      return objectTypes.flatMap(type => {
+        const records = recordsByType[type] ?? []
+        return records
+          .filter(r => {
+            const key = memberKey(type, r._id, multiObject)
+            return memberIdSet.has(key) || memberIdSet.has(r._id)
+          })
+          .map(r => ({ ...r, _objectType: type }))
+      })
+    }
+    return applyFiltersForObjectTypes(recordsByType, filters, objectTypes)
+  }, [objectTypes, recordsByType, filters, listType, memberIdSet, multiObject])
 
   const [manualSelected, setManualSelected] = useState<Set<string>>(() => new Set(matching.map(r => r._id)))
 
@@ -488,10 +559,14 @@ export default function SegmentBuilder({ segment, objectType, records, sequences
     })
   }, [matching])
 
-  function addFilter() {
-    const firstField = fields[0]
+  function addFilter(forType?: string) {
+    const type = forType ?? primaryType
+    const typeFields = fieldsByType[type] ?? []
+    const firstField = typeFields[0]
+    if (!firstField) return
     setFilters(prev => [...prev, {
       id: nanoid(8),
+      objectType: type,
       field: firstField.key,
       operator: firstField.operators[0],
       value: '',
@@ -510,7 +585,13 @@ export default function SegmentBuilder({ segment, objectType, records, sequences
 
   function save() {
     startTransition(async () => {
-      await saveSegmentFilters(segment.id, JSON.stringify(filters), name, description || undefined)
+      await saveSegmentFilters(
+        segment.id,
+        JSON.stringify(filters),
+        name,
+        description || undefined,
+        JSON.stringify(objectTypes),
+      )
       setSaved(true)
     })
   }
@@ -560,8 +641,17 @@ export default function SegmentBuilder({ segment, objectType, records, sequences
           <ArrowLeft className="w-5 h-5" />
         </Link>
 
-        <div className={`w-7 h-7 rounded-md ${cfg.bg} flex items-center justify-center shrink-0`}>
-          <cfg.Icon className={`w-4 h-4 ${cfg.color}`} />
+        <div className="flex items-center gap-1 shrink-0">
+          {objectTypes.map(t => {
+            const c = objectTypeMeta[t]
+            if (!c) return null
+            const Icon = resolveIcon(c.iconName)
+            return (
+              <div key={t} className={`w-7 h-7 rounded-md ${c.bg} flex items-center justify-center`} title={c.label}>
+                <Icon className={`w-4 h-4 ${c.color}`} />
+              </div>
+            )
+          })}
         </div>
 
         <div className="flex-1 flex items-center gap-3 min-w-0">
@@ -663,19 +753,27 @@ export default function SegmentBuilder({ segment, objectType, records, sequences
                 <h2 className="font-semibold text-zinc-900">Filters</h2>
                 <p className="text-xs text-zinc-400 mt-0.5">All filters are combined with AND logic</p>
               </div>
-              <button
-                onClick={addFilter}
-                className="flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 transition-colors"
-              >
-                <Plus className="w-4 h-4" /> Add Filter
-              </button>
+              {multiObject ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {objectTypes.map(t => (
+                    <button key={t} type="button" onClick={() => addFilter(t)} className="flex items-center gap-1 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50">
+                      <Plus className="w-3.5 h-3.5" /> {objectTypeMeta[t]?.label ?? t}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <button type="button" onClick={() => addFilter()} className="flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50">
+                  <Plus className="w-4 h-4" /> Add Filter
+                </button>
+              )}
             </div>
 
             {filters.length === 0 ? (
               <div className="rounded-xl border-2 border-dashed border-zinc-200 p-12 text-center">
-                <p className="text-zinc-400 text-sm mb-3">No filters added — all {cfg.label.toLowerCase()} will match</p>
+                <p className="text-zinc-400 text-sm mb-3">No filters added — all records from selected object types will match</p>
                 <button
-                  onClick={addFilter}
+                  type="button"
+                  onClick={() => addFilter()}
                   className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 transition-colors"
                 >
                   <Plus className="w-4 h-4" /> Add your first filter
@@ -694,20 +792,28 @@ export default function SegmentBuilder({ segment, objectType, records, sequences
                     )}
                     <FilterRow
                       filter={f}
-                      fields={fields}
-                      groups={groups}
+                      objectTypes={objectTypes}
+                      fieldsByType={fieldsByType}
+                      objectTypeMeta={objectTypeMeta}
                       sequences={sequences}
                       onUpdate={patch => updateFilter(f.id, patch)}
                       onRemove={() => removeFilter(f.id)}
                     />
                   </div>
                 ))}
-                <button
-                  onClick={addFilter}
-                  className="w-full mt-3 flex items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 py-2.5 text-sm text-zinc-500 hover:border-violet-400 hover:text-violet-600 transition-colors"
-                >
-                  <Plus className="w-4 h-4" /> Add Filter
-                </button>
+                {multiObject ? (
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {objectTypes.map(t => (
+                      <button key={t} type="button" onClick={() => addFilter(t)} className="flex items-center gap-1.5 rounded-xl border border-dashed border-zinc-300 px-3 py-2 text-sm text-zinc-500 hover:border-violet-400 hover:text-violet-600">
+                        <Plus className="w-4 h-4" /> {objectTypeMeta[t]?.label ?? t}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => addFilter()} className="w-full mt-3 flex items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 py-2.5 text-sm text-zinc-500 hover:border-violet-400 hover:text-violet-600">
+                    <Plus className="w-4 h-4" /> Add Filter
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -716,10 +822,9 @@ export default function SegmentBuilder({ segment, objectType, records, sequences
         {/* Right: Matching Records Preview */}
         <div className="w-80 shrink-0 border-l border-zinc-200 bg-zinc-50 flex flex-col min-h-0">
           <div className="px-4 py-3 border-b border-zinc-200 bg-white">
-            <div className="flex items-center gap-2">
-              <cfg.Icon className={`w-4 h-4 ${cfg.color}`} />
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-sm text-zinc-900">
-                {matching.length} / {records.length} {cfg.label.toLowerCase()}
+                {matching.length} / {allRecords.length} records
               </span>
               {manualSelected.size > 0 && (
                 <span className="ml-auto text-xs font-medium text-violet-600 bg-violet-100 px-2 py-0.5 rounded-full">
@@ -730,7 +835,7 @@ export default function SegmentBuilder({ segment, objectType, records, sequences
             <div className="mt-1.5 h-1.5 rounded-full bg-zinc-100 overflow-hidden">
               <div
                 className="h-full rounded-full bg-violet-500 transition-all duration-300"
-                style={{ width: records.length ? `${(matching.length / records.length) * 100}%` : '0%' }}
+                style={{ width: allRecords.length ? `${(matching.length / allRecords.length) * 100}%` : '0%' }}
               />
             </div>
           </div>
@@ -738,14 +843,14 @@ export default function SegmentBuilder({ segment, objectType, records, sequences
           <div className="flex-1 overflow-y-auto divide-y divide-zinc-100">
             {matching.length === 0 ? (
               <div className="p-8 text-center text-sm text-zinc-400">
-                No {cfg.label.toLowerCase()} match these filters
+                No records match these filters
               </div>
             ) : (
               matching.map(r => (
                 <RecordPreviewRow
-                  key={r._id}
+                  key={`${r._objectType ?? primaryType}:${r._id}`}
                   record={r}
-                  objectType={objectType}
+                  objectTypeMeta={objectTypeMeta}
                   checked={manualSelected.has(r._id)}
                   onToggle={() => setManualSelected(prev => {
                     const next = new Set(prev)

@@ -8,7 +8,7 @@ export default function DeleteAllButton({
   target,
   count,
 }: {
-  target: 'contacts' | 'companies' | 'deals'
+  target: 'contacts' | 'companies' | 'opportunities'
   count: number
 }) {
   const [confirming, setConfirming] = useState(false)

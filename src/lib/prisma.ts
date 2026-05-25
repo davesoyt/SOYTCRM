@@ -1,18 +1,32 @@
+import { Pool } from 'pg'
+import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../generated/prisma/client'
-import { PrismaLibSql } from '@prisma/adapter-libsql'
-import path from 'path'
 
-const globalForPrisma = global as unknown as { prisma: PrismaClient }
+type PrismaGlobal = {
+  prisma?: PrismaClient
+}
+
+const globalForPrisma = global as unknown as PrismaGlobal
 
 function createPrisma() {
-  const dbPath = path.resolve(process.cwd(), 'dev.db')
-  const adapter = new PrismaLibSql({ url: `file:${dbPath}` })
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    max: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  })
+  const adapter = new PrismaPg(pool)
   return new PrismaClient({ adapter })
 }
 
-// In development, always create a fresh client so schema changes after
-// `prisma generate` take effect without a full server restart.
-export const prisma =
-  process.env.NODE_ENV === 'production'
-    ? (globalForPrisma.prisma ?? (globalForPrisma.prisma = createPrisma()))
-    : createPrisma()
+function getPrisma(): PrismaClient {
+  if (globalForPrisma.prisma) return globalForPrisma.prisma
+
+  const client = createPrisma()
+  if (process.env.NODE_ENV !== 'production') {
+    globalForPrisma.prisma = client
+  }
+  return client
+}
+
+export const prisma = getPrisma()

@@ -1,8 +1,8 @@
-import type { Contact, Activity, Deal } from '../generated/prisma/client'
+import type { Contact, Activity, Opportunity } from '../generated/prisma/client'
 
 type ContactWithRelations = Contact & {
   activities: Activity[]
-  deals: Deal[]
+  opportunities: Opportunity[]
 }
 
 export function computeLeadScore(contact: ContactWithRelations): number {
@@ -19,17 +19,17 @@ export function computeLeadScore(contact: ContactWithRelations): number {
   score += Math.min(emailActivities * 3, 20)
   score += Math.min(callActivities * 5, 25)
 
-  // Deal pipeline signal
-  const activeDeals = contact.deals.filter((d) => !d.closedAt)
-  for (const deal of activeDeals) {
-    if (deal.stage === 'Proposal') score += 20
-    else if (deal.stage === 'Qualified') score += 15
-    else if (deal.stage === 'Prospect') score += 5
-    score += Math.min(deal.value / 10000, 10)
+  // Opportunity pipeline signal
+  const activeOpportunities = contact.opportunities.filter((d) => !d.closedAt)
+  for (const opp of activeOpportunities) {
+    if (opp.stage === 'Proposal') score += 20
+    else if (opp.stage === 'Qualified') score += 15
+    else if (opp.stage === 'Prospect') score += 5
+    score += Math.min(opp.value / 10000, 10)
   }
 
-  const wonDeals = contact.deals.filter((d) => d.stage === 'Closed Won')
-  score += wonDeals.length * 15
+  const wonOpportunities = contact.opportunities.filter((d) => d.stage === 'Closed Won')
+  score += wonOpportunities.length * 15
 
   return Math.min(Math.round(score), 100)
 }

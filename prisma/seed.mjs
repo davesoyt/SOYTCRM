@@ -18,7 +18,7 @@ async function main() {
     DELETE FROM SequenceStep;
     DELETE FROM Sequence;
     DELETE FROM Activity;
-    DELETE FROM Deal;
+    DELETE FROM Opportunity;
     DELETE FROM Contact;
     DELETE FROM Company;
   `)
@@ -47,18 +47,18 @@ async function main() {
     VALUES ('${daveId}', 'Dave', 'Williams', 'dave@acme.com', 'IT Director', 30, 0, '${acmeId}', '${daysAgo(10)}', '${daysAgo(1)}');
   `)
 
-  // Deals
+  // Opportunities
   const d1 = cuid(), d2 = cuid(), d3 = cuid(), d4 = cuid(), d5 = cuid()
   await db.executeMultiple(`
-    INSERT INTO Deal (id, name, value, stage, contactId, companyId, createdAt, updatedAt)
+    INSERT INTO Opportunity (id, name, value, stage, contactId, companyId, createdAt, updatedAt)
     VALUES ('${d1}', 'Acme Enterprise License', 120000, 'Proposal', '${aliceId}', '${acmeId}', '${daysAgo(20)}', '${daysAgo(5)}');
-    INSERT INTO Deal (id, name, value, stage, contactId, companyId, createdAt, updatedAt)
+    INSERT INTO Opportunity (id, name, value, stage, contactId, companyId, createdAt, updatedAt)
     VALUES ('${d2}', 'TechWave Platform Integration', 45000, 'Qualified', '${bobId}', '${techId}', '${daysAgo(14)}', '${daysAgo(7)}');
-    INSERT INTO Deal (id, name, value, stage, contactId, companyId, closedAt, createdAt, updatedAt)
+    INSERT INTO Opportunity (id, name, value, stage, contactId, companyId, closedAt, createdAt, updatedAt)
     VALUES ('${d3}', 'Greenfield Portfolio Tool', 85000, 'Closed Won', '${carolId}', '${greenId}', '${daysAgo(14)}', '${daysAgo(35)}', '${daysAgo(14)}');
-    INSERT INTO Deal (id, name, value, stage, contactId, companyId, createdAt, updatedAt)
+    INSERT INTO Opportunity (id, name, value, stage, contactId, companyId, createdAt, updatedAt)
     VALUES ('${d4}', 'Acme IT Upgrade', 28000, 'Prospect', '${daveId}', '${acmeId}', '${daysAgo(9)}', '${daysAgo(9)}');
-    INSERT INTO Deal (id, name, value, stage, contactId, companyId, closedAt, createdAt, updatedAt)
+    INSERT INTO Opportunity (id, name, value, stage, contactId, companyId, closedAt, createdAt, updatedAt)
     VALUES ('${d5}', 'TechWave Mobile App', 18000, 'Closed Lost', '${bobId}', '${techId}', '${daysAgo(30)}', '${daysAgo(40)}', '${daysAgo(30)}');
   `)
 
@@ -68,23 +68,23 @@ async function main() {
     [cuid(), 'email', 'Sent intro email', 'Hi Alice, following up on our call...', aliceId, null, null, daysAgo(20)],
     [cuid(), 'call', '30-min discovery call', 'Discussed pain points around procurement workflows.', aliceId, null, d1, daysAgo(15)],
     [cuid(), 'email', 'Sent proposal', 'Attached the formal proposal for the enterprise license.', aliceId, null, d1, daysAgo(5)],
-    [cuid(), 'stage_change', 'Deal moved to Proposal', null, aliceId, null, d1, daysAgo(5)],
+    [cuid(), 'stage_change', 'Opportunity moved to Proposal', null, aliceId, null, d1, daysAgo(5)],
     [cuid(), 'note', 'Contact created', null, bobId, null, null, daysAgo(18)],
     [cuid(), 'email', 'Intro email sent', null, bobId, null, null, daysAgo(14)],
     [cuid(), 'call', 'Technical requirements call', 'Bob needs API access and SSO.', bobId, null, d2, daysAgo(7)],
     [cuid(), 'note', 'Contact created', null, carolId, null, null, daysAgo(45)],
     [cuid(), 'enrichment', 'Contact enriched by AI', 'Carol manages a $300M fund focused on B2B SaaS.', carolId, null, null, daysAgo(44)],
     [cuid(), 'call', 'Partnership discussion', null, carolId, null, null, daysAgo(40)],
-    [cuid(), 'deal_created', 'Deal "Greenfield Portfolio Tool" created', null, carolId, null, d3, daysAgo(35)],
-    [cuid(), 'stage_change', 'Deal moved to Closed Won', null, carolId, null, d3, daysAgo(14)],
+    [cuid(), 'opportunity_created', 'Opportunity "Greenfield Portfolio Tool" created', null, carolId, null, d3, daysAgo(35)],
+    [cuid(), 'stage_change', 'Opportunity moved to Closed Won', null, carolId, null, d3, daysAgo(14)],
     [cuid(), 'note', 'Contact created', null, daveId, null, null, daysAgo(10)],
     [cuid(), 'email', 'Sent brochure', null, daveId, null, null, daysAgo(8)],
   ]
 
-  for (const [id, type, title, body, contactId, companyId, dealId, createdAt] of activities) {
+  for (const [id, type, title, body, contactId, companyId, opportunityId, createdAt] of activities) {
     await db.execute({
-      sql: `INSERT INTO Activity (id, type, title, body, contactId, companyId, dealId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [id, type, title, body, contactId, companyId, dealId, createdAt],
+      sql: `INSERT INTO Activity (id, type, title, body, contactId, companyId, opportunityId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, type, title, body, contactId, companyId, opportunityId, createdAt],
     })
   }
 
