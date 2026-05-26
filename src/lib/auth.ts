@@ -54,10 +54,10 @@ export async function createSession(userId: string, name: string) {
 }
 
 export async function getSession(): Promise<{ userId: string; name: string } | null> {
-  const cookieStore = await cookies()
-  const raw = cookieStore.get(SESSION_COOKIE)?.value
-  if (!raw) return null
   try {
+    const cookieStore = await cookies()
+    const raw = cookieStore.get(SESSION_COOKIE)?.value
+    if (!raw) return null
     const payload = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'))
     if (payload.userId && payload.name) return { userId: payload.userId, name: payload.name }
     return null

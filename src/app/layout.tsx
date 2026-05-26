@@ -17,18 +17,26 @@ export const metadata: Metadata = {
 
 const getShellData = unstable_cache(
   async () => {
-    const [settings, customObjects, firstUser] = await Promise.all([
-      prisma.cRMSettings.findUnique({ where: { id: 'default' } }),
-      prisma.customObjectDef.findMany({
-        orderBy: { createdAt: 'asc' },
-        select: { id: true, pluralName: true, icon: true },
-      }),
-      prisma.user.findFirst({ orderBy: { createdAt: 'asc' }, select: { id: true } }),
-    ])
-    return {
-      settings: { name: settings?.name ?? 'CRM', logoData: settings?.logoData ?? null },
-      customObjects,
-      currentUserId: firstUser?.id ?? null,
+    try {
+      const [settings, customObjects, firstUser] = await Promise.all([
+        prisma.cRMSettings.findUnique({ where: { id: 'default' } }),
+        prisma.customObjectDef.findMany({
+          orderBy: { createdAt: 'asc' },
+          select: { id: true, pluralName: true, icon: true },
+        }),
+        prisma.user.findFirst({ orderBy: { createdAt: 'asc' }, select: { id: true } }),
+      ])
+      return {
+        settings: { name: settings?.name ?? 'CRM', logoData: settings?.logoData ?? null },
+        customObjects,
+        currentUserId: firstUser?.id ?? null,
+      }
+    } catch {
+      return {
+        settings: { name: 'CRM', logoData: null },
+        customObjects: [] as { id: string; pluralName: string; icon: string }[],
+        currentUserId: null,
+      }
     }
   },
   ['shell-data'],
