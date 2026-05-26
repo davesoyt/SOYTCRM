@@ -3,6 +3,18 @@ import type { NextRequest } from 'next/server'
 
 const PUBLIC_PATHS = ['/login', '/logout', '/api/webhooks', '/api/workflows']
 
+function decodeBase64UrlToString(value: string): string {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
+
+  if (typeof atob === 'function') {
+    return atob(padded)
+  }
+
+  // Fallback for runtimes where Buffer is available.
+  return Buffer.from(padded, 'base64').toString('utf8')
+}
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
@@ -21,7 +33,7 @@ export function proxy(request: NextRequest) {
   }
 
   try {
-    const payload = JSON.parse(Buffer.from(session, 'base64').toString('utf8'))
+    const payload = JSON.parse(decodeBase64UrlToString(session))
     if (!payload.userId) throw new Error('invalid')
   } catch {
     const loginUrl = new URL('/login', request.url)
