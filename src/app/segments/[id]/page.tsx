@@ -35,15 +35,17 @@ export default async function SegmentPage({ params }: { params: Promise<{ id: st
 
   await Promise.all(
     objectTypes.map(async (type) => {
-      const records = await loadRecordsForType(type)
-      const { baseFields, extraFields } = await loadFieldsForType(type, records)
+      const [records, { baseFields, extraFields }] = await Promise.all([
+        loadRecordsForType(type),
+        loadFieldsForType(type, []),
+      ])
       recordsByType[type] = records
       fieldsByType[type] = [...baseFields, ...extraFields]
     }),
   )
 
   const sequences = objectTypes.includes('contact')
-    ? await prisma.sequence.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } })
+    ? allSequences
     : []
 
   return (

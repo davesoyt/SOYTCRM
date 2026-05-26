@@ -8,8 +8,8 @@ import {
   deleteWebhookIntegration,
   getWebhookFieldOptions,
   saveWebhookIntegration,
-  type SaveWebhookIntegrationInput,
 } from '@/app/actions'
+import type { SaveWebhookIntegrationInput } from '@/lib/actionTypes'
 import {
   STRIPE_EVENT_OPTIONS,
   STRIPE_PATH_HINTS,

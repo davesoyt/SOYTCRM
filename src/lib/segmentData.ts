@@ -232,6 +232,40 @@ async function loadStandardFields(
   return { baseFields, extraFields }
 }
 
+/** Resolve segment member count without building full record objects where possible. */
+export async function resolveSegmentCount(segment: SegmentForResolution): Promise<number> {
+  const objectTypes = parseSegmentObjectTypes(segment)
+
+  if (segment.listType === 'static') {
+    try {
+      const ids = JSON.parse(segment.memberIds) as string[]
+      return ids.length
+    } catch {
+      return 0
+    }
+  }
+
+  let filters: SegmentFilter[] = []
+  try { filters = JSON.parse(segment.filtersJson) } catch { /* */ }
+
+  if (filters.length === 0) {
+    const counts = await Promise.all(
+      objectTypes.map(async (type) => {
+        if (type === 'contact') return prisma.contact.count()
+        if (type === 'company') return prisma.company.count()
+        if (type === 'opportunity') return prisma.opportunity.count()
+        const defId = getCustomDefId(type)
+        if (!defId) return 0
+        return prisma.customObjectRecord.count({ where: { objectDefId: defId } })
+      }),
+    )
+    return counts.reduce((a, b) => a + b, 0)
+  }
+
+  const members = await resolveSegmentMembers(segment)
+  return members.length
+}
+
 /** Resolve segment members using the same rules as the segment builder UI. */
 export async function resolveSegmentMembers(segment: SegmentForResolution): Promise<FlatRecord[]> {
   const objectTypes = parseSegmentObjectTypes(segment)

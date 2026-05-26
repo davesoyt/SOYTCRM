@@ -648,14 +648,7 @@ export async function clearAllRecords(target: 'contacts' | 'companies' | 'opport
 
 // --- CSV Import ---
 
-export type ImportTask = { targetId: 'contact' | 'company'; mappedData: Record<string, string>[] }
-export type ImportConflict = {
-  targetId: string
-  existingId: string
-  identifier: string
-  type: string
-  diffs: Record<string, { current: string; import: string }>
-}
+import type { ImportTask, ImportConflict, SaveWebhookIntegrationInput, AddWebhookTargetFieldInput } from '@/lib/actionTypes'
 
 export async function checkImportConflicts(tasks: ImportTask[]): Promise<ImportConflict[]> {
   const conflicts: ImportConflict[] = []
@@ -999,7 +992,6 @@ import {
   type EnrichResult,
 } from '@/lib/enrichRecords'
 
-export type { EnrichTargetId, EnrichMode, EnrichRequest, EnrichResult }
 
 /** @deprecated Prefer POST /api/import/enrich for large CSV files. */
 export async function enrichRecordsFromCsv(req: EnrichRequest & { revalidate?: boolean }): Promise<EnrichResult> {
@@ -1718,16 +1710,6 @@ export async function createWebhookIntegration(name: string) {
   })
 }
 
-export type SaveWebhookIntegrationInput = {
-  name: string
-  enabled: boolean
-  targetKind: 'standard' | 'custom'
-  targetSlug: string
-  eventTypes: string[]
-  fieldMappings: import('@/lib/webhooks/types').WebhookFieldMapping[]
-  upsertFieldKey: string
-  webhookSecret: string
-}
 
 export async function saveWebhookIntegration(id: string, input: SaveWebhookIntegrationInput) {
   'use server'
@@ -1767,11 +1749,6 @@ export async function getWebhookFieldOptions(
   return getTargetFieldOptions(targetKind, targetSlug)
 }
 
-export type AddWebhookTargetFieldInput = {
-  key: string
-  label: string
-  fieldType?: string
-}
 
 export async function addWebhookTargetFields(
   targetKind: 'standard' | 'custom',

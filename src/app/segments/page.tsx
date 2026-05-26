@@ -3,7 +3,10 @@ import { prisma } from '@/lib/prisma'
 import { Plus, Filter, Box } from 'lucide-react'
 import { parseObjectTypes, type SegmentFilter } from '@/lib/filters'
 import { buildObjectTypeMeta, getObjectTypeLabel, resolveIcon } from '@/lib/segmentObjects'
+import { resolveSegmentCount } from '@/lib/segmentData'
 import SegmentDeleteButton from './SegmentDeleteButton'
+
+export const dynamic = 'force-dynamic'
 
 export default async function SegmentsPage() {
   const [segments, customObjects] = await Promise.all([
@@ -14,6 +17,12 @@ export default async function SegmentsPage() {
     }),
   ])
   const objectTypeMeta = buildObjectTypeMeta(customObjects)
+
+  const counts = await Promise.all(
+    segments.map((seg) => resolveSegmentCount(seg))
+  )
+  const countMap: Record<string, number> = {}
+  segments.forEach((seg, i) => { countMap[seg.id] = counts[i] })
 
   return (
     <div className="p-8">
@@ -91,7 +100,12 @@ export default async function SegmentsPage() {
                     <SegmentDeleteButton segmentId={seg.id} segmentName={seg.name} />
                   </div>
                 </div>
-                <p className="font-semibold text-zinc-900 group-hover:underline">{seg.name}</p>
+                <div className="flex items-center gap-2">
+                  <p className="font-semibold text-zinc-900 group-hover:underline">{seg.name}</p>
+                  <span className="text-xs font-medium text-zinc-500 bg-zinc-100 px-2 py-0.5 rounded-full">
+                    {countMap[seg.id]?.toLocaleString() ?? 0} record{countMap[seg.id] !== 1 ? 's' : ''}
+                  </span>
+                </div>
                 {seg.description && <p className="text-xs text-zinc-500 mt-0.5 truncate">{seg.description}</p>}
                 {filters.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-1">

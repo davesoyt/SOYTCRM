@@ -12,9 +12,8 @@ import {
   bulkImportAll,
   bulkImportCompanies,
   bulkImportContacts,
-  type ImportTask,
-  type ImportConflict,
 } from '@/app/actions'
+import type { ImportTask, ImportConflict } from '@/lib/actionTypes'
 
 // ── Fuzzy alias map ────────────────────────────────────────────────────────────
 const FIELD_ALIASES: Record<string, string[]> = {
