@@ -8,7 +8,9 @@ function decodeBase64UrlToString(value: string): string {
   const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
 
   if (typeof atob === 'function') {
-    return atob(padded)
+    const binary = atob(padded)
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+    return new TextDecoder().decode(bytes)
   }
 
   // Fallback for runtimes where Buffer is available.
