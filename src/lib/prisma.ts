@@ -9,8 +9,15 @@ type PrismaGlobal = {
 const globalForPrisma = global as unknown as PrismaGlobal
 
 function createPrisma() {
+  const databaseUrl = process.env.DATABASE_URL?.trim()
+  if (!databaseUrl) {
+    throw new Error(
+      'DATABASE_URL is missing. Set it in your environment (for Vercel: Project Settings -> Environment Variables) and redeploy.',
+    )
+  }
+
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: databaseUrl,
     max: 5,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,

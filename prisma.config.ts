@@ -3,12 +3,20 @@
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
+const databaseUrl = process.env["DATABASE_URL"]?.trim();
+
+if (!databaseUrl) {
+  throw new Error(
+    "DATABASE_URL is missing. Set DATABASE_URL locally and in Vercel Project Settings."
+  );
+}
+
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DIRECT_URL"] || process.env["DATABASE_URL"],
+    url: databaseUrl,
   },
 });

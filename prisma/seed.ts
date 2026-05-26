@@ -1,9 +1,14 @@
 import { PrismaClient } from '../src/generated/prisma/client'
-import { PrismaLibSql } from '@prisma/adapter-libsql'
-import { createClient } from '@libsql/client'
-const dbPath = '/Users/daveniemann/projects/AGTEST/.claude/worktrees/sweet-ptolemy-bad962/prisma/dev.db'
-const libsql = createClient({ url: `file:${dbPath}` })
-const adapter = new PrismaLibSql(libsql)
+import { PrismaPg } from '@prisma/adapter-pg'
+import { Pool } from 'pg'
+
+const databaseUrl = process.env.DATABASE_URL?.trim()
+if (!databaseUrl) {
+  throw new Error('DATABASE_URL is required for seeding. Use the same DATABASE_URL in Cursor and Vercel.')
+}
+
+const pool = new Pool({ connectionString: databaseUrl })
+const adapter = new PrismaPg(pool)
 const prisma = new PrismaClient({ adapter })
 
 async function main() {
@@ -175,4 +180,10 @@ async function main() {
   console.log('Seed complete')
 }
 
-main().catch(console.error).finally(() => process.exit(0))
+main()
+  .catch(console.error)
+  .finally(async () => {
+    await prisma.$disconnect()
+    await pool.end()
+    process.exit(0)
+  })
