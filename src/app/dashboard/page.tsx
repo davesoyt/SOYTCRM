@@ -8,36 +8,55 @@ import { Users, Building2, TrendingUp, CheckCircle2 } from 'lucide-react'
 
 const STAGES = ['Prospect', 'Qualified', 'Proposal', 'Closed Won', 'Closed Lost']
 
+export const dynamic = 'force-dynamic'
+
 export default async function DashboardPage() {
   const since = new Date()
   since.setDate(since.getDate() - 14)
 
-  const [contactsCount, companiesCount, opportunityByStage, hotContacts, activities] = await Promise.all([
-    prisma.contact.count(),
-    prisma.company.count(),
-    prisma.opportunity.groupBy({
-      by: ['stage'],
-      _count: { _all: true },
-      _sum: { value: true },
-    }),
-    prisma.contact.findMany({
-      orderBy: { leadScore: 'desc' },
-      take: 5,
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        leadScore: true,
-        opportunities: { select: { closedAt: true } },
-        _count: { select: { activities: true } },
-      },
-    }),
-    prisma.activity.findMany({
-      where: { createdAt: { gte: since } },
-      select: { createdAt: true },
-      orderBy: { createdAt: 'desc' },
-    }),
-  ])
+  let contactsCount = 0
+  let companiesCount = 0
+  let opportunityByStage: { stage: string; _count: { _all: number }; _sum: { value: number | null } }[] = []
+  let hotContacts: {
+    id: string
+    firstName: string
+    lastName: string
+    leadScore: number
+    opportunities: { closedAt: Date | null }[]
+    _count: { activities: number }
+  }[] = []
+  let activities: { createdAt: Date }[] = []
+
+  try {
+    ;[contactsCount, companiesCount, opportunityByStage, hotContacts, activities] = await Promise.all([
+      prisma.contact.count(),
+      prisma.company.count(),
+      prisma.opportunity.groupBy({
+        by: ['stage'],
+        _count: { _all: true },
+        _sum: { value: true },
+      }),
+      prisma.contact.findMany({
+        orderBy: { leadScore: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          leadScore: true,
+          opportunities: { select: { closedAt: true } },
+          _count: { select: { activities: true } },
+        },
+      }),
+      prisma.activity.findMany({
+        where: { createdAt: { gte: since } },
+        select: { createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ])
+  } catch {
+    // Build-time or transient DB outage fallback: render empty dashboard safely.
+  }
 
   const stageMap = new Map(
     opportunityByStage.map((row) => [row.stage, { count: row._count._all, value: row._sum.value ?? 0 }]),
