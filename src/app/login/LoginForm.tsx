@@ -6,7 +6,7 @@ import { Lock, Mail, Loader2 } from 'lucide-react'
 import { login } from './actions'
 
 export default function LoginForm() {
-  const [email, setEmail] = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
@@ -16,7 +16,7 @@ export default function LoginForm() {
     e.preventDefault()
     setError('')
     startTransition(async () => {
-      const result = await login(email, password)
+      const result = await login(identifier, password)
       if (result.success) {
         router.push('/dashboard')
         router.refresh()
@@ -45,15 +45,15 @@ export default function LoginForm() {
 
         <div>
           <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wide mb-1.5">
-            Email
+            Email or Username
           </label>
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
             <input
               type="text"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@company.com"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              placeholder="you@company.com or johndoe"
               autoComplete="username"
               required
               className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
@@ -81,7 +81,7 @@ export default function LoginForm() {
 
         <button
           type="submit"
-          disabled={isPending || !email || !password}
+          disabled={isPending || !identifier || !password}
           className="w-full flex items-center justify-center gap-2 rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 transition-colors"
         >
           {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : null}

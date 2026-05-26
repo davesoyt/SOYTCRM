@@ -3,7 +3,7 @@ import { createHash } from 'crypto'
 import { prisma } from '@/lib/prisma'
 
 const SESSION_COOKIE = 'crm_session'
-const MASTER_EMAIL = 'SOYTCRM'
+const MASTER_LOGIN = 'SOYTCRM'
 const MASTER_PASSWORD_HASH = createHash('sha256').update('test123').digest('hex')
 
 export function hashPassword(password: string): string {
@@ -14,19 +14,35 @@ export async function authenticate(
   emailOrUsername: string,
   password: string,
 ): Promise<{ success: true; userId: string; name: string } | { success: false; error: string }> {
+  const loginIdentifier = emailOrUsername.trim()
   const passwordHash = hashPassword(password)
 
-  if (emailOrUsername === MASTER_EMAIL && passwordHash === MASTER_PASSWORD_HASH) {
+  if (loginIdentifier.toLowerCase() === MASTER_LOGIN.toLowerCase() && passwordHash === MASTER_PASSWORD_HASH) {
     return { success: true, userId: '__master__', name: 'Master Admin' }
   }
 
-  const user = await prisma.user.findUnique({
-    where: { email: emailOrUsername },
+  let user = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { email: { equals: loginIdentifier, mode: 'insensitive' } },
+        { name: { equals: loginIdentifier, mode: 'insensitive' } },
+      ],
+    },
     select: { id: true, name: true, password: true },
   })
 
+  if (!user && loginIdentifier && !loginIdentifier.includes('@')) {
+    // Fallback: treat username as the local-part of email (e.g. "alex" => "alex@company.com").
+    user = await prisma.user.findFirst({
+      where: {
+        email: { startsWith: `${loginIdentifier}@`, mode: 'insensitive' },
+      },
+      select: { id: true, name: true, password: true },
+    })
+  }
+
   if (!user) {
-    return { success: false, error: 'Invalid email or password' }
+    return { success: false, error: 'Invalid email/username or password' }
   }
 
   if (!user.password) {
@@ -34,7 +50,7 @@ export async function authenticate(
   }
 
   if (user.password !== passwordHash) {
-    return { success: false, error: 'Invalid email or password' }
+    return { success: false, error: 'Invalid email/username or password' }
   }
 
   return { success: true, userId: user.id, name: user.name }
