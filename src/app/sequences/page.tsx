@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { Plus, GitBranch, Calendar } from 'lucide-react'
 import WorkflowCard from './WorkflowCard'
 
+export const dynamic = 'force-dynamic'
+
 const TRIGGER_COLORS: Record<string, string> = {
   Manual: 'bg-zinc-100 text-zinc-600',
   'Contact Created': 'bg-blue-100 text-blue-700',

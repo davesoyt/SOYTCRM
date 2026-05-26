@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma'
 import { ArrowLeft } from 'lucide-react'
 import RecordDetailClient from './RecordDetailClient'
 
+export const dynamic = 'force-dynamic'
+
 export default async function CustomObjectRecordPage({
   params,
 }: {

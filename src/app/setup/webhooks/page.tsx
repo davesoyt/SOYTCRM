@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { Webhook, ChevronRight } from 'lucide-react'
 import NewWebhookButton from './NewWebhookButton'
 
+export const dynamic = 'force-dynamic'
+
 export default async function WebhooksPage() {
   const integrations = await prisma.webhookIntegration.findMany({ orderBy: { createdAt: 'desc' } })
 

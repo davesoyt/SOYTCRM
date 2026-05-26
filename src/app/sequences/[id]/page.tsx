@@ -7,6 +7,8 @@ import { formatDistanceToNow } from 'date-fns'
 import WorkflowCanvas from './WorkflowCanvas'
 import type { Node, Edge } from '@xyflow/react'
 
+export const dynamic = 'force-dynamic'
+
 export default async function SequencePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const [sequence, users, segments, forms, segmentLinks] = await Promise.all([

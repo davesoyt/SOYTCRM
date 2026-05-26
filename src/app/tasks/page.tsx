@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/prisma'
 import TasksBoard from './TasksBoard'
 
+export const dynamic = 'force-dynamic'
+
 export default async function TasksPage() {
   const [tasks, users, segments, contacts, companies, opportunities] = await Promise.all([
     prisma.task.findMany({

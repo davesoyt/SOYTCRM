@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { Users, Building2, TrendingUp, Box, ChevronRight } from 'lucide-react'
 import NewObjectButton from './NewObjectButton'
 
+export const dynamic = 'force-dynamic'
+
 const STANDARD_OBJECTS = [
   { slug: 'contact', label: 'Contacts', icon: Users, color: 'bg-violet-100 text-violet-600', desc: 'People in your CRM' },
   { slug: 'company', label: 'Companies', icon: Building2, color: 'bg-blue-100 text-blue-600', desc: 'Organizations you work with' },

@@ -5,6 +5,8 @@ import { deleteCustomObjectDef } from '@/app/actions'
 import { loadSchemaFields } from '@/lib/objectSchema'
 import { Trash2 } from 'lucide-react'
 
+export const dynamic = 'force-dynamic'
+
 export default async function ObjectFieldsPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params
 

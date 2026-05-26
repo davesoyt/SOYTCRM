@@ -1,11 +1,24 @@
 import { prisma } from '@/lib/prisma'
 import NewSegmentForm from './NewSegmentForm'
 
+export const dynamic = 'force-dynamic'
+
 export default async function NewSegmentPage() {
-  const customObjects = await prisma.customObjectDef.findMany({
-    orderBy: { createdAt: 'asc' },
-    select: { id: true, pluralName: true, icon: true, color: true },
-  })
+  let customObjects: { id: string; pluralName: string; icon: string; color: string }[] = []
+  try {
+    const defs = await prisma.customObjectDef.findMany({
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, pluralName: true, icon: true, color: true },
+    })
+    customObjects = defs.map((d) => ({
+      id: d.id,
+      pluralName: d.pluralName,
+      icon: d.icon,
+      color: d.color ?? '#6366f1',
+    }))
+  } catch {
+    customObjects = []
+  }
 
   return (
     <div className="p-8 max-w-2xl">

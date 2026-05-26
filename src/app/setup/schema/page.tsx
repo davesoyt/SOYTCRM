@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { STANDARD_OBJECTS } from '@/lib/objectSchemaShared'
 import { Users, Building2, TrendingUp, Box, ChevronRight, Table2 } from 'lucide-react'
 
+export const dynamic = 'force-dynamic'
+
 const ICONS: Record<string, typeof Users> = {
   contact: Users,
   company: Building2,
