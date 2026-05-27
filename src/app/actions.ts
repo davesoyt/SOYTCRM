@@ -1822,18 +1822,78 @@ export async function addWebhookTargetFields(
 
 // --- Custom Object Records ---
 
+function parseRecordJson(data: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(data || '{}') as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+async function withAutoIncrementValues(
+  objectDefId: string,
+  data: Record<string, string>,
+): Promise<Record<string, string>> {
+  const autoFields = await prisma.fieldDefinition.findMany({
+    where: { customObjectDefId: objectDefId, fieldType: 'auto_increment', hidden: false },
+    select: { key: true },
+  })
+
+  if (!autoFields.length) return data
+
+  const rows = await prisma.customObjectRecord.findMany({
+    where: { objectDefId },
+    select: { data: true },
+  })
+
+  const nextData = { ...data }
+
+  for (const field of autoFields) {
+    let max = 0
+    for (const row of rows) {
+      const parsed = parseRecordJson(row.data)
+      const raw = parsed[field.key]
+      const num = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN
+      if (Number.isInteger(num) && num > max) max = num
+    }
+    nextData[field.key] = String(max + 1)
+  }
+
+  return nextData
+}
+
 export async function createCustomObjectRecord(objectDefId: string, data: Record<string, string>) {
+  const payload = await withAutoIncrementValues(objectDefId, data)
   const record = await prisma.customObjectRecord.create({
-    data: { objectDefId, data: JSON.stringify(data) },
+    data: { objectDefId, data: JSON.stringify(payload) },
   })
   revalidatePath(`/objects/${objectDefId}`)
   redirect(`/objects/${objectDefId}/${record.id}`)
 }
 
 export async function updateCustomObjectRecord(id: string, objectDefId: string, data: Record<string, string>) {
+  const [autoFields, existingRecord] = await Promise.all([
+    prisma.fieldDefinition.findMany({
+      where: { customObjectDefId: objectDefId, fieldType: 'auto_increment' },
+      select: { key: true },
+    }),
+    prisma.customObjectRecord.findUnique({ where: { id }, select: { data: true } }),
+  ])
+
+  const payload = { ...data }
+  const existing = parseRecordJson(existingRecord?.data ?? '{}')
+  for (const field of autoFields) {
+    if (existing[field.key] !== undefined && existing[field.key] !== null) {
+      payload[field.key] = String(existing[field.key])
+    }
+  }
+
   await prisma.customObjectRecord.update({
     where: { id },
-    data: { data: JSON.stringify(data) },
+    data: { data: JSON.stringify(payload) },
   })
   revalidatePath(`/objects/${objectDefId}/${id}`)
 }

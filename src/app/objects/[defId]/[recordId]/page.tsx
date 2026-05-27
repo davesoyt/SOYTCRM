@@ -28,10 +28,11 @@ export default async function CustomObjectRecordPage({
     key: f.key,
     label: f.label,
     fieldType: f.fieldType,
+    isPrimary: f.isPrimary,
     selectOptions: JSON.parse(f.selectOptions || '[]') as string[],
   }))
 
-  const primaryField = fields.find(f => f.fieldType === 'text') ?? fields[0]
+  const primaryField = fields.find(f => f.isPrimary) ?? fields.find(f => f.fieldType === 'text') ?? fields[0]
   const displayName = primaryField ? (data[primaryField.key] || '—') : record.id.slice(0, 8)
 
   return (

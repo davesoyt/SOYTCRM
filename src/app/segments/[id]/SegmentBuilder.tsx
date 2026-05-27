@@ -19,6 +19,7 @@ import {
 import { isStandardObjectType, resolveIcon, type ObjectTypeMeta } from '@/lib/segmentObjects'
 import { saveSegmentFilters, deleteSegment, geocodeAddress, assignSegmentToUser, removeSegmentAssignment, assignSegmentToWorkflow, removeSegmentWorkflowLink, setSegmentListType, refreshStaticSegment } from '@/app/actions'
 import ExecuteWorkflowModal from '@/components/ExecuteWorkflowModal'
+import SegmentMap, { type SegmentMapPoint } from '@/components/SegmentMap'
 
 type Assignment = { id: string; userId: string; user: { id: string; name: string; color: string } }
 
@@ -49,6 +50,7 @@ type Props = {
 // ---- GeoFilterRow ----
 function GeoFilterRow({ filter, onUpdate }: { filter: SegmentFilter; onUpdate: (patch: Partial<SegmentFilter>) => void }) {
   const [address, setAddress] = useState('')
+  const [showMapPicker, setShowMapPicker] = useState(false)
   const [geocoding, setGeocoding] = useState(false)
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
@@ -62,6 +64,14 @@ function GeoFilterRow({ filter, onUpdate }: { filter: SegmentFilter; onUpdate: (
       setGeocoding(false)
       if (!result) { setError('Address not found. Try a more specific location.'); return }
       onUpdate({ geoLat: result.lat, geoLng: result.lng, geoLabel: result.label })
+    })
+  }
+
+  function setCenterFromMap(lat: number, lng: number) {
+    onUpdate({
+      geoLat: lat,
+      geoLng: lng,
+      geoLabel: `Dropped pin (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
     })
   }
 
@@ -109,7 +119,22 @@ function GeoFilterRow({ filter, onUpdate }: { filter: SegmentFilter; onUpdate: (
           {geocoding || isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
           Locate
         </button>
+        <button
+          onClick={() => setShowMapPicker(v => !v)}
+          className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors shrink-0"
+        >
+          {showMapPicker ? 'Hide map' : 'Pick on map'}
+        </button>
       </div>
+      {showMapPicker && (
+        <SegmentMap
+          points={[]}
+          center={filter.geoLat != null && filter.geoLng != null ? { lat: filter.geoLat, lng: filter.geoLng } : null}
+          radiusMiles={filter.operator === 'within_km' ? (parseFloat(filter.value) || 0) / 1.60934 : parseFloat(filter.value) || 0}
+          onPickCenter={setCenterFromMap}
+          className="h-56"
+        />
+      )}
     </div>
   )
 }
@@ -513,6 +538,7 @@ export default function SegmentBuilder({
   workflowLinks,
   allSequences,
 }: Props) {
+  const [previewMode, setPreviewMode] = useState<'list' | 'map'>('list')
   const multiObject = objectTypes.length > 1
   const primaryType = objectTypes[0]
   const allRecords = useMemo(
@@ -549,6 +575,42 @@ export default function SegmentBuilder({
   }, [objectTypes, recordsByType, filters, listType, memberIdSet, multiObject])
 
   const [manualSelected, setManualSelected] = useState<Set<string>>(() => new Set(matching.map(r => r._id)))
+
+  const activeGeoFilter = useMemo(
+    () => filters.find((f) => f.field === 'geo' && f.geoLat != null && f.geoLng != null),
+    [filters],
+  )
+  const activeRadiusMiles = useMemo(() => {
+    if (!activeGeoFilter) return null
+    const radius = parseFloat(activeGeoFilter.value)
+    if (!radius || Number.isNaN(radius)) return null
+    return activeGeoFilter.operator === 'within_km' ? radius / 1.60934 : radius
+  }, [activeGeoFilter])
+  const mapCenter = activeGeoFilter ? { lat: activeGeoFilter.geoLat as number, lng: activeGeoFilter.geoLng as number } : null
+
+  const mapPoints = useMemo<SegmentMapPoint[]>(() => {
+    const colors: Record<string, string> = {
+      contact: '#2563eb',
+      company: '#16a34a',
+      opportunity: '#dc2626',
+    }
+    return matching
+      .map((record) => {
+        const lat = typeof record.lat === 'number' ? record.lat : Number(record.lat)
+        const lng = typeof record.lng === 'number' ? record.lng : Number(record.lng)
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+        const type = (record._objectType as string) ?? primaryType
+        return {
+          id: `${type}:${record._id}`,
+          label: String(record._displayName ?? record._id),
+          sublabel: `${objectTypeMeta[type]?.label ?? type} • ${record._subtext ?? ''}`,
+          lat,
+          lng,
+          color: colors[type] ?? '#7c3aed',
+        } satisfies SegmentMapPoint
+      })
+      .filter((point): point is SegmentMapPoint => point !== null)
+  }, [matching, objectTypeMeta, primaryType])
 
   // When filters change, auto-select any newly matched records (preserve explicit deselections)
   useEffect(() => {
@@ -826,8 +888,22 @@ export default function SegmentBuilder({
               <span className="font-semibold text-sm text-zinc-900">
                 {matching.length} / {allRecords.length} records
               </span>
+              <div className="inline-flex rounded-lg border border-zinc-200 bg-zinc-50 p-0.5 text-xs ml-auto">
+                <button
+                  onClick={() => setPreviewMode('list')}
+                  className={`rounded-md px-2 py-0.5 font-medium ${previewMode === 'list' ? 'bg-white text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}
+                >
+                  List
+                </button>
+                <button
+                  onClick={() => setPreviewMode('map')}
+                  className={`rounded-md px-2 py-0.5 font-medium ${previewMode === 'map' ? 'bg-white text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}
+                >
+                  Map
+                </button>
+              </div>
               {manualSelected.size > 0 && (
-                <span className="ml-auto text-xs font-medium text-violet-600 bg-violet-100 px-2 py-0.5 rounded-full">
+                <span className="text-xs font-medium text-violet-600 bg-violet-100 px-2 py-0.5 rounded-full">
                   {manualSelected.size} selected
                 </span>
               )}
@@ -840,27 +916,49 @@ export default function SegmentBuilder({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto divide-y divide-zinc-100">
-            {matching.length === 0 ? (
-              <div className="p-8 text-center text-sm text-zinc-400">
-                No records match these filters
-              </div>
-            ) : (
-              matching.map(r => (
-                <RecordPreviewRow
-                  key={`${r._objectType ?? primaryType}:${r._id}`}
-                  record={r}
-                  objectTypeMeta={objectTypeMeta}
-                  checked={manualSelected.has(r._id)}
-                  onToggle={() => setManualSelected(prev => {
-                    const next = new Set(prev)
-                    next.has(r._id) ? next.delete(r._id) : next.add(r._id)
-                    return next
-                  })}
-                />
-              ))
-            )}
-          </div>
+          {previewMode === 'list' ? (
+            <div className="flex-1 overflow-y-auto divide-y divide-zinc-100">
+              {matching.length === 0 ? (
+                <div className="p-8 text-center text-sm text-zinc-400">
+                  No records match these filters
+                </div>
+              ) : (
+                matching.map(r => (
+                  <RecordPreviewRow
+                    key={`${r._objectType ?? primaryType}:${r._id}`}
+                    record={r}
+                    objectTypeMeta={objectTypeMeta}
+                    checked={manualSelected.has(r._id)}
+                    onToggle={() => setManualSelected(prev => {
+                      const next = new Set(prev)
+                      next.has(r._id) ? next.delete(r._id) : next.add(r._id)
+                      return next
+                    })}
+                  />
+                ))
+              )}
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {mapPoints.length === 0 ? (
+                <div className="p-4 rounded-lg border border-zinc-200 bg-white text-sm text-zinc-500">
+                  No mappable records in current results. Add lat/lng data (or geocode contacts) to see pins.
+                </div>
+              ) : (
+                <>
+                  <SegmentMap
+                    points={mapPoints}
+                    center={mapCenter}
+                    radiusMiles={activeRadiusMiles}
+                    className="h-80"
+                  />
+                  <p className="text-xs text-zinc-500 px-1">
+                    Showing {mapPoints.length} mapped records out of {matching.length} matches.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
           <AssignedUsersPanel segmentId={segment.id} users={users} assignments={assignments} />
           <WorkflowAssignPanel
             segmentId={segment.id}

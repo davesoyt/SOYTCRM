@@ -115,6 +115,7 @@ export const COMPANY_FIELDS: FieldMeta[] = [
   { key: 'industry',   label: 'Industry',          group: 'Company',  valueType: 'text',   operators: TEXT_OPS },
   { key: 'size',       label: 'Employee Size',     group: 'Company',  valueType: 'text',   operators: TEXT_OPS },
   { key: 'website',    label: 'Website',           group: 'Company',  valueType: 'text',   operators: ['is_set', 'is_not_set', 'contains'] },
+  { key: 'geo',        label: 'Distance from…',    group: 'Location', valueType: 'geo',    operators: GEO_OPS },
   // Contacts (related)
   { key: 'contactCount', label: 'Number of Contacts', group: 'Contacts', valueType: 'number', operators: NUM_OPS },
   // Opportunities (related; filter keys kept for saved segments)
@@ -135,6 +136,7 @@ export const OPPORTUNITY_FIELDS: FieldMeta[] = [
   { key: 'stage',      label: 'Stage',             group: 'Opportunity',     valueType: 'select', operators: SELECT_OPS, options: STAGES },
   { key: 'isClosed',   label: 'Is Closed',         group: 'Opportunity',     valueType: 'boolean',operators: BOOL_OPS, options: ['true', 'false'] },
   { key: 'daysOpen',   label: 'Days Since Created',group: 'Opportunity',     valueType: 'number', operators: NUM_OPS },
+  { key: 'geo',        label: 'Distance from…',    group: 'Location',        valueType: 'geo',    operators: GEO_OPS },
   // Contact (related)
   { key: 'contactName',  label: 'Contact Name',    group: 'Contact',  valueType: 'text',   operators: TEXT_OPS },
   { key: 'contactEmail', label: 'Contact Email',   group: 'Contact',  valueType: 'text',   operators: TEXT_OPS },
@@ -327,7 +329,7 @@ type PrismaCompany = {
   id: string; name: string; domain: string | null; industry: string | null
   size: string | null; website: string | null
   customFields: string
-  contacts: { id: string }[]
+  contacts: { id: string; lat: number | null; lng: number | null }[]
   opportunities: { stage: string; value: number }[]
   activities: { type: string }[]
 }
@@ -335,7 +337,7 @@ type PrismaCompany = {
 type PrismaOpportunity = {
   id: string; name: string; value: number; stage: string
   createdAt: Date; closedAt: Date | null
-  contact: { firstName: string; lastName: string; email: string; title: string | null; leadScore: number } | null
+  contact: { firstName: string; lastName: string; email: string; title: string | null; leadScore: number; lat: number | null; lng: number | null } | null
   company: { name: string; industry: string | null } | null
   activities: { type: string }[]
 }
@@ -372,12 +374,21 @@ export function flattenCompany(c: PrismaCompany): FlatRecord {
   let parsedCustom: Record<string, string> = {}
   try { parsedCustom = JSON.parse(c.customFields) } catch {}
   const customEntries = Object.fromEntries(Object.entries(parsedCustom).map(([k, v]) => [`custom_${k}`, v]))
+  const geoContacts = c.contacts.filter((contact) => contact.lat != null && contact.lng != null)
+  const lat = geoContacts.length
+    ? geoContacts.reduce((sum, contact) => sum + Number(contact.lat), 0) / geoContacts.length
+    : null
+  const lng = geoContacts.length
+    ? geoContacts.reduce((sum, contact) => sum + Number(contact.lng), 0) / geoContacts.length
+    : null
+
   return {
     _id: c.id, _href: `/companies/${c.id}`,
     _displayName: c.name,
     _subtext: [c.industry, c.domain].filter(Boolean).join(' · ') || 'No details',
     _initials: c.name[0] ?? '?',
     name: c.name, domain: c.domain, industry: c.industry, size: c.size, website: c.website,
+    lat, lng,
     contactCount: c.contacts.length,
     dealCount: c.opportunities.length, dealValue, wonValue,
     dealStages: c.opportunities.map(d => d.stage),
@@ -402,6 +413,8 @@ export function flattenOpportunity(d: PrismaOpportunity): FlatRecord {
     contactEmail: d.contact?.email ?? null,
     contactTitle: d.contact?.title ?? null,
     contactScore: d.contact?.leadScore ?? null,
+    lat: d.contact?.lat ?? null,
+    lng: d.contact?.lng ?? null,
     // Company
     companyName: d.company?.name ?? null,
     companyIndustry: d.company?.industry ?? null,

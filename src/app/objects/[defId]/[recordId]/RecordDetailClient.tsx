@@ -42,6 +42,18 @@ export default function RecordDetailClient({
   }
 
   const renderInput = (f: FieldMeta) => {
+    if (f.fieldType === 'auto_increment') {
+      return (
+        <input
+          type="number"
+          value={draft[f.key] ?? ''}
+          readOnly
+          disabled
+          className="w-full rounded-lg border border-zinc-200 bg-zinc-100 px-3 py-2 text-sm text-zinc-500"
+        />
+      )
+    }
+
     if (f.fieldType === 'select') {
       return (
         <select value={draft[f.key] ?? ''} onChange={e => setDraft(v => ({ ...v, [f.key]: e.target.value }))}

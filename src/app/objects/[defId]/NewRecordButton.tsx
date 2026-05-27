@@ -41,7 +41,15 @@ export default function NewRecordButton({ defId, fields }: { defId: string; fiel
         {fields.map(f => (
           <div key={f.key}>
             <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wide mb-1">{f.label}</label>
-            {f.fieldType === 'select' ? (
+            {f.fieldType === 'auto_increment' ? (
+              <input
+                type="text"
+                value="Auto-generated"
+                readOnly
+                disabled
+                className="w-full rounded-lg border border-zinc-200 bg-zinc-100 px-3 py-2 text-sm text-zinc-500"
+              />
+            ) : f.fieldType === 'select' ? (
               <select value={values[f.key] ?? ''} onChange={e => setValues(v => ({ ...v, [f.key]: e.target.value }))}
                 className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-zinc-900">
                 <option value="">— Select —</option>

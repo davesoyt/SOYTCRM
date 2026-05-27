@@ -8,6 +8,7 @@ import type { SchemaField } from '@/lib/objectSchemaShared'
 const FIELD_TYPES = [
   { value: 'text', label: 'Text' },
   { value: 'number', label: 'Number' },
+  { value: 'auto_increment', label: 'Auto Increment (integer)' },
   { value: 'date', label: 'Date' },
   { value: 'email', label: 'Email' },
   { value: 'phone', label: 'Phone' },
@@ -170,7 +171,13 @@ export default function SchemaEditor({
                 <td className="px-2 py-2">
                   <select
                     value={row.fieldType}
-                    onChange={(e) => updateRow(i, { fieldType: e.target.value })}
+                    onChange={(e) => {
+                      const nextType = e.target.value
+                      updateRow(i, {
+                        fieldType: nextType,
+                        ...(nextType === 'auto_increment' ? { required: false } : {}),
+                      })
+                    }}
                     className="w-full rounded-lg border border-zinc-200 px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-zinc-900"
                   >
                     {FIELD_TYPES.map((t) => (
@@ -185,6 +192,7 @@ export default function SchemaEditor({
                     type="checkbox"
                     checked={row.required}
                     onChange={(e) => updateRow(i, { required: e.target.checked })}
+                    disabled={row.fieldType === 'auto_increment'}
                     className="rounded border-zinc-300"
                   />
                 </td>

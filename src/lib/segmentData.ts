@@ -11,6 +11,7 @@ import {
   TEXT_OPS,
   NUM_OPS,
   SELECT_OPS,
+  GEO_OPS,
   type StandardObjectType,
   type FlatRecord,
   type FieldMeta,
@@ -90,7 +91,7 @@ async function loadStandardRecords(type: StandardObjectType): Promise<FlatRecord
   if (type === 'company') {
     const companies = await prisma.company.findMany({
       include: {
-        contacts: { select: { id: true } },
+        contacts: { select: { id: true, lat: true, lng: true } },
         opportunities: { select: { stage: true, value: true } },
         activities: { select: { type: true } },
       },
@@ -100,7 +101,7 @@ async function loadStandardRecords(type: StandardObjectType): Promise<FlatRecord
   }
   const opportunities = await prisma.opportunity.findMany({
     include: {
-      contact: { select: { firstName: true, lastName: true, email: true, title: true, leadScore: true } },
+      contact: { select: { firstName: true, lastName: true, email: true, title: true, leadScore: true, lat: true, lng: true } },
       company: { select: { name: true, industry: true } },
       activities: { select: { type: true } },
     },
@@ -167,12 +168,27 @@ async function loadCustomFields(
     },
   ]
 
+  const hasGeoColumns = records.some((record) => {
+    const lat = record.lat
+    const lng = record.lng
+    return typeof lat === 'number' && !Number.isNaN(lat) && typeof lng === 'number' && !Number.isNaN(lng)
+  })
+  if (hasGeoColumns) {
+    extraFields.unshift({
+      key: 'geo',
+      label: 'Distance from…',
+      group: 'Location',
+      valueType: 'geo',
+      operators: GEO_OPS,
+    })
+  }
+
   return { baseFields, extraFields }
 }
 
 async function loadStandardFields(
   type: StandardObjectType,
-  _records: FlatRecord[],
+  records: FlatRecord[],
 ): Promise<{ baseFields: FieldMeta[]; extraFields: FieldMeta[] }> {
   const fieldDefs = await prisma.fieldDefinition.findMany({
     where: { objectType: type },
@@ -181,12 +197,19 @@ async function loadStandardFields(
   })
   const fieldDefMap = new Map(fieldDefs.map(f => [f.key, f]))
 
+  const hasGeoColumns = records.some((record) => {
+    const lat = record.lat
+    const lng = record.lng
+    return typeof lat === 'number' && !Number.isNaN(lat) && typeof lng === 'number' && !Number.isNaN(lng)
+  })
+
   const hardcodedBase =
     type === 'contact' ? CONTACT_FIELDS
     : type === 'company' ? COMPANY_FIELDS
     : OPPORTUNITY_FIELDS
 
   const baseFields: FieldMeta[] = hardcodedBase.flatMap(hf => {
+    if (hf.key === 'geo' && !hasGeoColumns) return []
     const saved = fieldDefMap.get(hf.key)
     if (saved?.hidden) return []
     if (!saved) return [hf]

@@ -20,6 +20,7 @@ type FieldDef = {
 const FIELD_TYPES = [
   { value: 'text',    label: 'Text' },
   { value: 'number',  label: 'Number' },
+  { value: 'auto_increment', label: 'Auto Increment (integer)' },
   { value: 'date',    label: 'Date' },
   { value: 'email',   label: 'Email' },
   { value: 'phone',   label: 'Phone' },
@@ -79,7 +80,13 @@ function FieldRow({
             <label className="block text-xs font-medium text-zinc-400 mb-0.5">Type</label>
             <select
               value={field.fieldType}
-              onChange={e => onChange({ fieldType: e.target.value })}
+              onChange={e => {
+                const nextType = e.target.value
+                onChange({
+                  fieldType: nextType,
+                  ...(nextType === 'auto_increment' ? { required: false } : {}),
+                })
+              }}
               className="w-full rounded-lg border border-zinc-200 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 bg-white"
             >
               {FIELD_TYPES.map(t => (
@@ -132,6 +139,7 @@ function FieldRow({
                   type="checkbox"
                   checked={field.required}
                   onChange={e => onChange({ required: e.target.checked })}
+                  disabled={field.fieldType === 'auto_increment'}
                   className="rounded border-zinc-300"
                 />
                 Required

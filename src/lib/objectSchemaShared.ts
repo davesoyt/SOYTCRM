@@ -3,6 +3,7 @@
 export type SchemaFieldType =
   | 'text'
   | 'number'
+  | 'auto_increment'
   | 'date'
   | 'email'
   | 'phone'
