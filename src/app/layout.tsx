@@ -6,7 +6,6 @@ import Sidebar from '@/components/Sidebar'
 import NotificationsBell from '@/components/NotificationsBell'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
-import Link from 'next/link'
 
 const geist = Geist({ subsets: ['latin'], variable: '--font-geist-sans' })
 
@@ -71,12 +70,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               {session.name}
             </span>
             <NotificationsBell currentUserId={currentUserId} />
-            <Link
-              href="/logout"
-              className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50 transition-colors"
-            >
-              Logout
-            </Link>
+            <form action="/logout" method="post">
+              <button
+                type="submit"
+                className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50 transition-colors"
+              >
+                Logout
+              </button>
+            </form>
           </header>
           <div className="flex-1 min-h-0 flex flex-col">{children}</div>
         </main>
