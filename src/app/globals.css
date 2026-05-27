@@ -17,3 +17,8 @@ body {
   background: #f4f4f5;
   color: #171717;
 }
+
+html.route-loading-cursor,
+html.route-loading-cursor * {
+  cursor: progress !important;
+}

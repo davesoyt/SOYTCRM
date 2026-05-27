@@ -4,6 +4,7 @@ import { unstable_cache } from 'next/cache'
 import './globals.css'
 import Sidebar from '@/components/Sidebar'
 import NotificationsBell from '@/components/NotificationsBell'
+import NavigationLoadingCursor from '@/components/NavigationLoadingCursor'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 
@@ -50,6 +51,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     return (
       <html lang="en" className={`${geist.variable} h-full`}>
         <body className="h-full font-sans antialiased bg-zinc-50 text-zinc-900">
+          <NavigationLoadingCursor />
           {children}
         </body>
       </html>
@@ -59,6 +61,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en" className={`${geist.variable} h-full`}>
       <body className="h-full flex font-sans antialiased bg-zinc-50 text-zinc-900">
+        <NavigationLoadingCursor />
         <Sidebar
           crmName={settings.name}
           logoData={settings.logoData ?? null}
