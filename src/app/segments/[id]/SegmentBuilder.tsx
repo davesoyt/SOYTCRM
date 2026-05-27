@@ -539,6 +539,7 @@ export default function SegmentBuilder({
   allSequences,
 }: Props) {
   const [previewMode, setPreviewMode] = useState<'list' | 'map'>('list')
+  const [mapFullscreen, setMapFullscreen] = useState(false)
   const multiObject = objectTypes.length > 1
   const primaryType = objectTypes[0]
   const allRecords = useMemo(
@@ -620,6 +621,15 @@ export default function SegmentBuilder({
       return next
     })
   }, [matching])
+
+  useEffect(() => {
+    if (!mapFullscreen) return
+    const { overflow } = document.body.style
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = overflow
+    }
+  }, [mapFullscreen])
 
   function addFilter(forType?: string) {
     const type = forType ?? primaryType
@@ -890,13 +900,19 @@ export default function SegmentBuilder({
               </span>
               <div className="inline-flex rounded-lg border border-zinc-200 bg-zinc-50 p-0.5 text-xs ml-auto">
                 <button
-                  onClick={() => setPreviewMode('list')}
+                  onClick={() => {
+                    setPreviewMode('list')
+                    setMapFullscreen(false)
+                  }}
                   className={`rounded-md px-2 py-0.5 font-medium ${previewMode === 'list' ? 'bg-white text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}
                 >
                   List
                 </button>
                 <button
-                  onClick={() => setPreviewMode('map')}
+                  onClick={() => {
+                    setPreviewMode('map')
+                    setMapFullscreen(true)
+                  }}
                   className={`rounded-md px-2 py-0.5 font-medium ${previewMode === 'map' ? 'bg-white text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}
                 >
                   Map
@@ -940,6 +956,37 @@ export default function SegmentBuilder({
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {activeGeoFilter ? (
+                <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2">
+                  <p className="text-xs font-semibold text-violet-800 mb-1">Geo search settings</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={activeGeoFilter.value}
+                      onChange={(e) => updateFilter(activeGeoFilter.id, { value: e.target.value })}
+                      className="w-24 rounded-lg border border-violet-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    />
+                    <select
+                      value={activeGeoFilter.operator}
+                      onChange={(e) => updateFilter(activeGeoFilter.id, { operator: e.target.value as FilterOperator })}
+                      className="rounded-lg border border-violet-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    >
+                      <option value="within_miles">miles</option>
+                      <option value="within_km">km</option>
+                    </select>
+                    <span className="text-xs text-violet-700 truncate">
+                      Center: {activeGeoFilter.geoLabel ?? 'Set in Distance from… filter'}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Add a <strong>Distance from…</strong> filter on the left to set radius and center point.
+                </div>
+              )}
+
               {mapPoints.length === 0 ? (
                 <div className="p-4 rounded-lg border border-zinc-200 bg-white text-sm text-zinc-500">
                   No mappable records in current results. Add lat/lng data (or geocode contacts) to see pins.
@@ -968,6 +1015,84 @@ export default function SegmentBuilder({
           />
         </div>
       </div>
+
+      {mapFullscreen && (
+        <div className="fixed inset-0 z-[100] bg-zinc-950/65 p-4">
+          <div className="h-full w-full rounded-2xl border border-zinc-300 bg-white shadow-2xl flex flex-col overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-200 bg-white">
+              <div className="text-sm font-semibold text-zinc-900">
+                Segment Map ({mapPoints.length}/{matching.length} mapped records)
+              </div>
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setMapFullscreen(false)
+                    setPreviewMode('list')
+                  }}
+                  className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
+                >
+                  Back to list
+                </button>
+                <button
+                  onClick={() => setMapFullscreen(false)}
+                  className="rounded-lg border border-zinc-300 p-1.5 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors"
+                  title="Close full-screen map"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="px-4 py-3 border-b border-zinc-100">
+              {activeGeoFilter ? (
+                <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2">
+                  <p className="text-xs font-semibold text-violet-800 mb-1">Geo search settings</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={activeGeoFilter.value}
+                      onChange={(e) => updateFilter(activeGeoFilter.id, { value: e.target.value })}
+                      className="w-24 rounded-lg border border-violet-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    />
+                    <select
+                      value={activeGeoFilter.operator}
+                      onChange={(e) => updateFilter(activeGeoFilter.id, { operator: e.target.value as FilterOperator })}
+                      className="rounded-lg border border-violet-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    >
+                      <option value="within_miles">miles</option>
+                      <option value="within_km">km</option>
+                    </select>
+                    <span className="text-xs text-violet-700 truncate">
+                      Center: {activeGeoFilter.geoLabel ?? 'Set in Distance from… filter'}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Add a <strong>Distance from…</strong> filter on the left to set radius and center point.
+                </div>
+              )}
+            </div>
+
+            <div className="flex-1 p-4 min-h-0">
+              {mapPoints.length === 0 ? (
+                <div className="h-full rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-500">
+                  No mappable records in current results. Add lat/lng data (or geocode contacts) to see pins.
+                </div>
+              ) : (
+                <SegmentMap
+                  points={mapPoints}
+                  center={mapCenter}
+                  radiusMiles={activeRadiusMiles}
+                  className="h-full"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
