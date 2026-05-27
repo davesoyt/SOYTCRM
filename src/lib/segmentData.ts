@@ -197,19 +197,12 @@ async function loadStandardFields(
   })
   const fieldDefMap = new Map(fieldDefs.map(f => [f.key, f]))
 
-  const hasGeoColumns = records.some((record) => {
-    const lat = record.lat
-    const lng = record.lng
-    return typeof lat === 'number' && !Number.isNaN(lat) && typeof lng === 'number' && !Number.isNaN(lng)
-  })
-
   const hardcodedBase =
     type === 'contact' ? CONTACT_FIELDS
     : type === 'company' ? COMPANY_FIELDS
     : OPPORTUNITY_FIELDS
 
   const baseFields: FieldMeta[] = hardcodedBase.flatMap(hf => {
-    if (hf.key === 'geo' && !hasGeoColumns) return []
     const saved = fieldDefMap.get(hf.key)
     if (saved?.hidden) return []
     if (!saved) return [hf]
